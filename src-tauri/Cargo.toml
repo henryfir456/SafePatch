@@ -1,0 +1,34 @@
+[package]
+name = "safepatch"
+version = "0.1.0"
+edition = "2021"
+default-run = "safepatch"
+
+[lib]
+name = "safepatch_lib"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:tauri", "dep:tauri-build"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [], optional = true }
+
+[dependencies]
+tauri = { version = "2", features = [], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tempfile = "3"
+
+[[bin]]
+name = "safepatch"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "inventory_probe"
+path = "src/bin/inventory_probe.rs"

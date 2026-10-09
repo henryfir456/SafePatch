@@ -1,0 +1,21 @@
+// Real scanner integration probe. Output contains only aggregate evidence.
+use safepatch_lib::ScanService;
+use std::time::{Duration,Instant};
+fn main()->Result<(),Box<dyn std::error::Error>>{
+    let dir=tempfile::tempdir()?;
+    let service=ScanService::new(dir.path().join("inventory.sqlite"))?;
+    let started=Instant::now();let scan=service.start("windows")?;
+    loop{
+        let s=service.status(&scan.id)?;
+        if s.status!="RUNNING"{
+            let assets=service.assets(&s.id)?;
+            let recreated=ScanService::new(dir.path().join("inventory.sqlite"))?;
+            let persisted=recreated.assets(&s.id)?;
+            println!("{}",serde_json::to_string_pretty(&serde_json::json!({"status":s.status,"coverage":s.coverage,"error_code":s.error_code,"asset_count":assets.len(),"versioned_count":assets.iter().filter(|a|a.installed_version.is_some()).count(),"publisher_count":assets.iter().filter(|a|a.publisher.is_some()).count(),"duplicate_candidates":assets.iter().filter(|a|a.duplicate_group.is_some()).count(),"restart_preserved":assets.len()==persisted.len(),"elapsed_seconds":started.elapsed().as_secs(),"verification":"REAL_RUST_ADAPTER_SQLITE; DESKTOP_UI_NOT_VERIFIED"}))?);
+            if assets.is_empty() || matches!(s.status.as_str(),"FAILED"|"CANCELLED"){return Err("inventory verification failed".into())}break;
+        }
+        if started.elapsed()>Duration::from_secs(120){service.cancel(&scan.id)?;return Err("probe timeout".into())}
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
