@@ -10,6 +10,7 @@ name = "safepatch_lib"
 [features]
 default = ["desktop"]
 desktop = ["dep:tauri", "dep:tauri-build"]
+acceptance = ["desktop"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -23,6 +24,9 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [[bin]]
 name = "safepatch"

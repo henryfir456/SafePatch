@@ -7,6 +7,29 @@ pub const SCRIPT:&str=include_str!("../adapters/windows_inventory.ps1");
 const MAX_OUTPUT:u64=8*1024*1024;
 
 #[cfg(windows)]
+struct OwnedJob(windows_sys::Win32::Foundation::HANDLE);
+#[cfg(windows)]
+impl OwnedJob {
+    fn assign(child:&std::process::Child)->Result<Self,String>{
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{Foundation::CloseHandle,System::JobObjects::*};
+        unsafe {
+            let handle=CreateJobObjectW(std::ptr::null(),std::ptr::null());
+            if handle.is_null(){return Err("SCAN_JOB_FAILED".into())}
+            let mut info:JOBOBJECT_EXTENDED_LIMIT_INFORMATION=std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(handle,JobObjectExtendedLimitInformation,&info as *const _ as *const _,std::mem::size_of_val(&info) as u32)==0
+                || AssignProcessToJobObject(handle,child.as_raw_handle() as _)==0 {
+                CloseHandle(handle);return Err("SCAN_JOB_FAILED".into())
+            }
+            Ok(Self(handle))
+        }
+    }
+}
+#[cfg(windows)]
+impl Drop for OwnedJob {fn drop(&mut self){unsafe{windows_sys::Win32::Foundation::CloseHandle(self.0);}}}
+
+#[cfg(windows)]
 fn powershell()->Result<std::path::PathBuf,String>{
     // GetWindowsDirectoryW avoids PATH and an attacker-controlled SystemRoot variable.
     #[link(name="kernel32")]
@@ -29,6 +52,10 @@ pub fn collect(cancel:Arc<AtomicBool>)->Result<AdapterOutput,String>{
         .env("SAFEPATCH_CANCEL_FILE",&cancel_file).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
     let mut child=command.spawn().map_err(|_|"ADAPTER_LAUNCH_FAILED")?;
+    // Before supplying any script, contain only our child and its descendants.
+    // Handles close on app exit too, preventing orphan WinGet/PowerShell processes.
+    #[cfg(windows)]
+    let _job=match OwnedJob::assign(&child){Ok(job)=>job,Err(code)=>{let _=child.kill();let _=child.wait();return Err(code)}};
     let mut stdin=child.stdin.take().ok_or("ADAPTER_INPUT_FAILED")?;
     let stdout=child.stdout.take().ok_or("ADAPTER_OUTPUT_FAILED")?;
     let stderr=child.stderr.take().ok_or("ADAPTER_OUTPUT_FAILED")?;

@@ -3,6 +3,8 @@ pub mod model;
 pub mod windows;
 #[cfg(feature="desktop")]
 pub mod desktop;
+#[cfg(feature="acceptance")]
+mod acceptance;
 use model::{Asset,Scan};
 use std::{path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicBool,Ordering}}};
 

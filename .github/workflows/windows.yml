@@ -27,13 +27,20 @@ jobs:
         shell: powershell
         run: ./scripts/test-adapter.ps1
       - name: Rust unit tests and migrations
-        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
       - name: Rust static analysis
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Windows Tauri build
-        run: npm run tauri -- build --no-bundle
+        run: npm run tauri -- build --no-bundle -- --locked
       - name: Build real inventory integration probe
-        run: cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --bin inventory_probe
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin inventory_probe
+      - name: Build instrumented real WebView acceptance executable
+        run: |
+          Copy-Item src-tauri/target/release/safepatch.exe src-tauri/target/release/safepatch-production.exe
+          cargo build --locked --manifest-path src-tauri/Cargo.toml --release --features acceptance --bin safepatch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item src-tauri/target/release/safepatch.exe src-tauri/target/release/safepatch-acceptance.exe
+          Copy-Item src-tauri/target/release/safepatch-production.exe src-tauri/target/release/safepatch.exe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -42,5 +49,7 @@ jobs:
           path: |
             src-tauri/Cargo.lock
             src-tauri/target/release/safepatch.exe
+            src-tauri/target/release/safepatch-production.exe
+            src-tauri/target/release/safepatch-acceptance.exe
             src-tauri/target/debug/inventory_probe.exe
           retention-days: 7

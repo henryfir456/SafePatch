@@ -20,7 +20,7 @@ npm run tauri -- dev
 npm run tauri -- build --no-bundle
 ```
 
-Dependencies are pinned in npm's lockfile, fetched from registry.npmjs.org, and installed with lifecycle scripts disabled. Vite uses the declared platform binary dependency. Rust crates are fetched from crates.io; Rust build scripts compile only declared application dependencies. They are never executed for scanned projects. CI action revisions are pinned. The first CI run creates Cargo.lock; retain and commit it before delivery and use `--locked` thereafter.
+Dependencies are pinned in npm's lockfile, fetched from registry.npmjs.org, and installed with lifecycle scripts disabled. Vite uses the declared platform binary dependency. Rust crates are fetched from crates.io; Rust build scripts compile only declared application dependencies. They are never executed for scanned projects. CI action revisions are pinned. Cargo.lock was recovered from the digest-verified initial Windows CI artifact and committed; CI uses `--locked`.
 
 ## Operate
 
@@ -38,7 +38,7 @@ WinGet export provides catalog ID and version, not product display name, Publish
 
 Reflected Registry views merge only for the same key hash, scope, nonempty install path hash, exact product/publisher/version metadata. Multiple paths, scopes and versions remain separate. Exact identity/version candidates are grouped as POTENTIAL and retained; without strong evidence, Registry and catalog records are not silently collapsed. Same-name different-vendor records are not grouped by name alone. This conservative limitation is visible in the UI. M1 does not provide vulnerability findings or a safe verdict.
 
-Cancellation is checked per Registry entry and every 100 ms during WinGet. WinGet has a 45-second deadline and its own child process is reaped. The Rust adapter has a 100-second outer watchdog and an 8 MiB output limit. SafePatch terminates only subprocesses it creates. No foreign process is stopped.
+Cancellation is checked per Registry entry and every 100 ms during WinGet. WinGet has a 45-second deadline and its own child process is reaped. The Rust adapter has a 100-second outer watchdog and an 8 MiB output limit. An owned Windows Job is assigned before providing the fixed script; kill-on-close contains/reaps only our PowerShell and its descendants, including on app exit or timeout. Job-assignment failure refuses the scan. SafePatch terminates only subprocesses it creates. No foreign process is stopped. The adapter restricts PSModulePath to its trusted Windows system modules for that process only.
 
 ## Repeatable actual Windows checks
 
@@ -50,3 +50,16 @@ cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --bin inven
 ```
 
 Then launch the desktop app, start a scan, confirm actual rows/versions and partial errors are rendered, cancel a second scan, restart and verify persistence. Keep full inventory/screen content local. Public acceptance reports may include aggregate counts and coverage codes only. A unit test, a hosted runner build or the standalone adapter does not establish desktop end-to-end acceptance; record each gate separately in `docs/M1_VERIFICATION.md` and the linked Issues. Installer generation is reserved for M5.
+
+When the local compiler is unavailable, download **this repository's** CI artifact and verify its archive SHA-256 against GitHub's artifact digest. It contains the production executable, real Rust integration probe, and a separate `acceptance`-feature executable. The latter uses a hidden native WebView, real DOM click events, production IPC/adapter/normalization/SQLite, and checks rendered rows/versions, cancellation, partial status and process-restart persistence. It has no device fixtures. Test-only IPC and scripts are excluded from the production binary. Run the following as the current user, without elevation, in the isolated artifact directory:
+
+```powershell
+.\inventory_probe.exe
+.\inventory_probe.exe --cancel
+$check=Start-Process .\safepatch-acceptance.exe -ArgumentList '--acceptance-check' -WindowStyle Hidden -PassThru -Wait
+$check.ExitCode # 0 means the automated desktop gate passed
+$restart=Start-Process .\safepatch-acceptance.exe -ArgumentList '--acceptance-restart' -WindowStyle Hidden -PassThru -Wait
+$restart.ExitCode
+```
+
+The acceptance binary writes only local `desktop-acceptance.sqlite`, `desktop-acceptance.json`, and `desktop-restart.json` beside itself, bounded to 150 seconds. JSON reports contain only counts, internal scan ID and booleans, never the inventory. This is automated native-WebView acceptance, distinct from human-visible/manual UI review and installer acceptance. The probe and desktop executable are in different subdirectories of the CI artifact (`target/debug` vs `target/release`); use their actual paths after extraction.
