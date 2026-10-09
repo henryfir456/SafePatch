@@ -43,14 +43,15 @@ fn powershell()->Result<std::path::PathBuf,String>{
 #[cfg(not(windows))]
 fn powershell()->Result<std::path::PathBuf,String>{Err("WINDOWS_REQUIRED".into())}
 
-pub fn collect(cancel:Arc<AtomicBool>)->Result<AdapterOutput,String>{
+pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result<AdapterOutput,String>{
     let exe=powershell()?;
     let modules=exe.parent().ok_or("POWERSHELL_DIRECTORY_FAILED")?.join("Modules");
     let dir=tempfile::tempdir().map_err(|_|"SCAN_TEMP_FAILED")?;
     let cancel_file=dir.path().join("cancel");
+    let progress_file=dir.path().join("phase");
     let mut command=Command::new(exe);
     command.args(["-NoLogo","-NoProfile","-NonInteractive","-Command","-"])
-        .env("SAFEPATCH_CANCEL_FILE",&cancel_file).env("PSModulePath",modules).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        .env("SAFEPATCH_CANCEL_FILE",&cancel_file).env("SAFEPATCH_PROGRESS_FILE",&progress_file).env("PSModulePath",modules).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
     let mut child=command.spawn().map_err(|_|"ADAPTER_LAUNCH_FAILED")?;
     // Before supplying any script, contain only our child and its descendants.
@@ -68,8 +69,10 @@ pub fn collect(cancel:Arc<AtomicBool>)->Result<AdapterOutput,String>{
     if stdin.write_all(script.as_bytes()).is_err(){let _=child.kill();let _=child.wait();return Err("ADAPTER_INPUT_FAILED".into())}
     drop(stdin);
     let started=Instant::now();
+    let mut previous_phase=String::new();
     let status=loop {
         if cancel.load(Ordering::Relaxed){let _=std::fs::write(&cancel_file,b"cancel");}
+        if let Ok(phase)=std::fs::read_to_string(&progress_file){if phase!=previous_phase{match phase.as_str(){"REGISTRY_DONE"=>progress(45,"Registry complete / querying signed WinGet"),"WINGET_DONE"=>progress(80,"normalizing actual inventory"),_=>{}}previous_phase=phase;}}
         match child.try_wait(){Ok(Some(status))=>break status,Ok(None)=>{},Err(_)=>{let _=child.kill();let _=child.wait();return Err("ADAPTER_WAIT_FAILED".into())}}
         // Adapter bounds registry at 30s and WinGet at 45s; allow cleanup overhead.
         if started.elapsed()>Duration::from_secs(100){let _=child.kill();let _=child.wait();return Err("ADAPTER_TIMEOUT".into())}
@@ -87,5 +90,5 @@ pub fn collect(cancel:Arc<AtomicBool>)->Result<AdapterOutput,String>{
     use super::*;
     #[test]fn fixed_adapter_has_no_install_upgrade_or_untrusted_binary_probe(){assert!(!SCRIPT.contains("winget install"));assert!(!SCRIPT.contains("winget upgrade"));assert!(SCRIPT.contains("Get-AuthenticodeSignature"));assert!(SCRIPT.contains("OpenSubKey($name,$false)"));assert!(!SCRIPT.contains("--accept-source-agreements"));}
     #[cfg(not(windows))]
-    #[test]fn unsupported_os_is_an_error(){assert_eq!(collect(Arc::new(AtomicBool::new(false))).err().unwrap(),"WINDOWS_REQUIRED");}
+    #[test]fn unsupported_os_is_an_error(){assert_eq!(collect(Arc::new(AtomicBool::new(false)),|_,_|{}).err().unwrap(),"WINDOWS_REQUIRED");}
 }

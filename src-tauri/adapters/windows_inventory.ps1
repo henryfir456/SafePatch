@@ -129,7 +129,9 @@ function Get-WinGetInventory {
 function Invoke-WindowsInventory {
     [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
     $registry=Get-RegistryInventory
+    if($env:SAFEPATCH_PROGRESS_FILE){[IO.File]::WriteAllText($env:SAFEPATCH_PROGRESS_FILE,'REGISTRY_DONE')}
     $winget=if(Test-Cancelled){[pscustomobject]@{records=@();coverage=@([pscustomobject]@{scanner='winget';status='UNKNOWN';count=0;codes=@('CANCELLED')})}}else{Get-WinGetInventory}
+    if($env:SAFEPATCH_PROGRESS_FILE){[IO.File]::WriteAllText($env:SAFEPATCH_PROGRESS_FILE,'WINGET_DONE')}
     [pscustomobject]@{records=@($registry.records)+@($winget.records);coverage=@($registry.coverage)+@($winget.coverage)} | ConvertTo-Json -Depth 8 -Compress
 }
 if($MyInvocation.InvocationName -ne '.') { Invoke-WindowsInventory }

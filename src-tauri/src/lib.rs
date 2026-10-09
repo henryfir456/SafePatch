@@ -30,7 +30,7 @@ impl ScanService {
         *active=Some(Active{scan:scan.clone(),cancel:cancel.clone()});
         let service=self.clone();
         let spawned=std::thread::Builder::new().name("safepatch-inventory".into()).spawn(move||{
-            let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||windows::collect(cancel.clone()).and_then(|o|model::normalize(o,&chrono::Utc::now().to_rfc3339()).map_err(String::from)))).unwrap_or_else(|_|Err("SCANNER_PANIC".into()));
+            let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||windows::collect(cancel.clone(),|percent,phase|{if let Ok(mut guard)=service.active.lock(){if let Some(active)=guard.as_mut(){active.scan.progress=percent;active.scan.phase=phase.into();}}}).and_then(|o|model::normalize(o,&chrono::Utc::now().to_rfc3339()).map_err(String::from)))).unwrap_or_else(|_|Err("SCANNER_PANIC".into()));
             service.complete(result,cancel.load(Ordering::Relaxed));
         });
         if spawned.is_err(){drop(active);self.complete(Err("SCAN_WORKER_FAILED".into()),false);return Err("SCAN_WORKER_FAILED".into())}
