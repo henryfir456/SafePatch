@@ -45,11 +45,12 @@ fn powershell()->Result<std::path::PathBuf,String>{Err("WINDOWS_REQUIRED".into()
 
 pub fn collect(cancel:Arc<AtomicBool>)->Result<AdapterOutput,String>{
     let exe=powershell()?;
+    let modules=exe.parent().ok_or("POWERSHELL_DIRECTORY_FAILED")?.join("Modules");
     let dir=tempfile::tempdir().map_err(|_|"SCAN_TEMP_FAILED")?;
     let cancel_file=dir.path().join("cancel");
     let mut command=Command::new(exe);
     command.args(["-NoLogo","-NoProfile","-NonInteractive","-Command","-"])
-        .env("SAFEPATCH_CANCEL_FILE",&cancel_file).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        .env("SAFEPATCH_CANCEL_FILE",&cancel_file).env("PSModulePath",modules).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
     let mut child=command.spawn().map_err(|_|"ADAPTER_LAUNCH_FAILED")?;
     // Before supplying any script, contain only our child and its descendants.

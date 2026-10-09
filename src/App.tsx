@@ -2,15 +2,15 @@ import { useEffect, useState } from 'react';
 import { api, Asset, Scan } from './api';
 const active=(s:Scan|null)=>s?.status==='RUNNING';
 export function App(){
-  const [scan,setScan]=useState<Scan|null>(null),[assets,setAssets]=useState<Asset[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[query,setQuery]=useState(''),[source,setSource]=useState('all');
-  useEffect(()=>{let alive=true;api.latest().then(async s=>{if(alive)setScan(s);if(s){const a=await api.assets(s.id);if(alive)setAssets(a);}}).catch(()=>{if(alive)setError('BACKEND_UNAVAILABLE：請從 SafePatch Windows 桌面程式啟動。');});return()=>{alive=false;};},[]);
+  const [scan,setScan]=useState<Scan|null>(null),[assets,setAssets]=useState<Asset[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[query,setQuery]=useState(''),[source,setSource]=useState('all');
+  useEffect(()=>{let alive=true;api.latest().then(async s=>{const a=s?await api.assets(s.id):[];if(alive){setAssets(a);setScan(s);}}).catch(()=>{if(alive)setError('BACKEND_UNAVAILABLE：請從 SafePatch Windows 桌面程式啟動。');}).finally(()=>{if(alive)setLoading(false);});return()=>{alive=false;};},[]);
   useEffect(()=>{if(!active(scan))return;let alive=true;let pending=false;const id=scan!.id;
-    const timer=setInterval(async()=>{if(pending)return;pending=true;try{const s=await api.status(id);if(alive)setScan(s);if(s.status!=='RUNNING'){const a=await api.assets(id);if(alive)setAssets(a);}}catch{if(alive)setError('STATUS_UNAVAILABLE：無法取得掃描狀態。');}finally{pending=false;}},500);
+    const timer=setInterval(async()=>{if(pending)return;pending=true;try{const s=await api.status(id);if(s.status!=='RUNNING'){const a=await api.assets(id);if(alive){setAssets(a);setScan(s);}}else if(alive)setScan(s);}catch{if(alive)setError('STATUS_UNAVAILABLE：無法取得掃描狀態。');}finally{pending=false;}},500);
     return()=>{alive=false;clearInterval(timer);};},[scan?.id,scan?.status]);
   async function start(){setBusy(true);setError('');try{const s=await api.start();setScan(s);setAssets([]);}catch{setError('SCAN_START_FAILED：請確認沒有其他掃描正在執行，且本地資料庫可寫入。');}finally{setBusy(false);}}
   async function cancel(){if(!scan)return;try{await api.cancel(scan.id);}catch{setError('CANCEL_FAILED：取消要求未送達。');}}
   const shown=assets.filter(a=>(a.display_name+' '+(a.publisher??'')+' '+(a.normalized_id??'')).toLowerCase().includes(query.toLowerCase())&&(source==='all'||a.provenance.some(p=>p.scanner===source)));
-  return <main><header><div><span className="eyebrow">LOCAL DEVICE INVENTORY</span><h1>SafePatch</h1><p>Windows 軟體盤點 · 資料保留於本機</p></div><div className="actions"><button disabled={busy||active(scan)} onClick={start}>{busy?'啟動中…':'開始唯讀掃描'}</button>{active(scan)&&<button className="secondary" onClick={cancel}>取消掃描</button>}</div></header>
+  return <main><header><div><span className="eyebrow">LOCAL DEVICE INVENTORY</span><h1>SafePatch</h1><p>Windows 軟體盤點 · 資料保留於本機</p></div><div className="actions"><button disabled={loading||busy||active(scan)} onClick={start}>{busy?'啟動中…':'開始唯讀掃描'}</button>{active(scan)&&<button className="secondary" onClick={cancel}>取消掃描</button>}</div></header>
     <aside className="notice"><strong>UNKNOWN ≠ 安全</strong> M1 僅盤點軟體，尚未執行漏洞比對。不會更新軟體、安裝依賴或要求提高權限。WinGet 可能讀取官方來源中繼資料；不傳送本機清單。</aside>
     {error&&<p role="alert" className="error">{error}</p>}
     <section className="summary" aria-label="掃描摘要"><div><span>盤點項目</span><strong>{assets.length}</strong></div><div><span>掃描狀態</span><strong>{scan?.status??'尚未掃描'}</strong></div><div><span>漏洞適用性</span><strong>UNKNOWN</strong></div></section>

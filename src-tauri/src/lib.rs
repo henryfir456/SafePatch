@@ -1,6 +1,7 @@
 pub mod db;
 pub mod model;
 pub mod windows;
+mod instance;
 #[cfg(feature="desktop")]
 pub mod desktop;
 #[cfg(feature="acceptance")]
@@ -9,12 +10,14 @@ use model::{Asset,Scan};
 use std::{path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicBool,Ordering}}};
 
 struct Active { scan:Scan,cancel:Arc<AtomicBool> }
-pub struct ScanService { path:PathBuf,active:Mutex<Option<Active>> }
+pub struct ScanService { path:PathBuf,active:Mutex<Option<Active>>,#[cfg(windows)] _instance:instance::InstanceLock }
 impl ScanService {
     pub fn new(path:PathBuf)->Result<Arc<Self>,String>{
+        #[cfg(windows)]
+        let instance=instance::InstanceLock::acquire(&path)?;
         let db=db::open(&path).map_err(|_|"DATABASE_OPEN_FAILED")?;
         db::interrupt(&db).map_err(|_|"DATABASE_RECOVERY_FAILED")?;
-        Ok(Arc::new(Self{path,active:Mutex::new(None)}))
+        Ok(Arc::new(Self{path,active:Mutex::new(None),#[cfg(windows)] _instance:instance}))
     }
     pub fn start(self:&Arc<Self>,scope:&str)->Result<Scan,String>{
         if scope!="windows"{return Err("UNSUPPORTED_SCOPE".into())}
@@ -52,4 +55,6 @@ impl ScanService {
 #[cfg(test)]mod tests{
     use super::*;
     #[test]fn ipc_scope_and_ids_are_validated(){let dir=tempfile::tempdir().unwrap();let s=ScanService::new(dir.path().join("db.sqlite")).unwrap();assert_eq!(s.start("C:\\private; execute").err().unwrap(),"UNSUPPORTED_SCOPE");assert_eq!(s.status("../../../secret").err().unwrap(),"INVALID_SCAN_ID");assert!(s.latest().unwrap().is_none());}
+    #[cfg(windows)]
+    #[test]fn second_instance_cannot_interrupt_live_database(){let dir=tempfile::tempdir().unwrap();let path=dir.path().join("db.sqlite");let owner=ScanService::new(path.clone()).unwrap();assert_eq!(ScanService::new(path.clone()).err().unwrap(),"DATABASE_IN_USE");drop(owner);assert!(ScanService::new(path).is_ok());}
 }

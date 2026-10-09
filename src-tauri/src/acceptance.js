@@ -29,10 +29,12 @@
     const versioned=assets.filter(a=>a.installed_version!==null).length;
     const renderedVersions=rows.filter(r=>r.cells[1].textContent!=='UNKNOWN').length;
     if(versioned!==renderedVersions)throw Error('ACCEPTANCE_VERSION_RENDER_FAILED');
+    if(rows.some((r,i)=>r.cells[0].querySelector('b').textContent!==assets[i].display_name||r.cells[1].textContent!==(assets[i].installed_version??'UNKNOWN')||r.cells[2].textContent!==(assets[i].publisher??'UNKNOWN')))throw Error('ACCEPTANCE_EXACT_METADATA_FAILED');
     if(!document.body.textContent.includes('UNKNOWN ≠ 安全'))throw Error('ACCEPTANCE_UNKNOWN_LABEL_FAILED');
     if(s.coverage.some(c=>c.status!=='COMPLETE')&&!document.body.textContent.includes('PARTIAL'))throw Error('ACCEPTANCE_COVERAGE_RENDER_FAILED');
     await invoke('acceptance_report',{report:{mode,scan_id:s.id,asset_count:assets.length,rendered_rows:rows.length,versioned_count:versioned,rendered_versions:renderedVersions,cancellation,passed:true,error_code:null}});
-  }catch{
-    await invoke('acceptance_report',{report:{mode:'failed',scan_id:null,asset_count:0,rendered_rows:0,versioned_count:0,rendered_versions:0,cancellation:false,passed:false,error_code:'DESKTOP_ACCEPTANCE_FAILED'}});
+  }catch(error){
+    const code=/^ACCEPTANCE_[A-Z_]+$/.test(error?.message??'')?error.message:'DESKTOP_ACCEPTANCE_FAILED';
+    await invoke('acceptance_report',{report:{mode:'failed',scan_id:null,asset_count:0,rendered_rows:0,versioned_count:0,rendered_versions:0,cancellation:false,passed:false,error_code:code}});
   }
 })();

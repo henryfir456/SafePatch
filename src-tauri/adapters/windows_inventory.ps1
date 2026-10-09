@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 # Process-only restriction prevents inherited PowerShell 7 or user-module hijacking.
 # All autoloaded cmdlets must come from this Windows PowerShell installation.
-$env:PSModulePath = Join-Path $PSHOME 'Modules'
+$env:PSModulePath = [IO.Path]::Combine($PSHOME,'Modules')
 
 function Get-PathHash([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return $null }

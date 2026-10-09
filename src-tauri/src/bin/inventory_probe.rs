@@ -11,6 +11,8 @@ fn main()->Result<(),Box<dyn std::error::Error>>{
         let s=service.status(&scan.id)?;
         if s.status!="RUNNING"{
             let assets=service.assets(&s.id)?;
+            drop(service);
+            std::thread::sleep(Duration::from_millis(100));
             let recreated=ScanService::new(dir.path().join("inventory.sqlite"))?;
             let persisted=recreated.assets(&s.id)?;
             let preserved=serde_json::to_value(&assets)?==serde_json::to_value(&persisted)?;

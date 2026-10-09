@@ -26,6 +26,8 @@ jobs:
       - name: PowerShell adapter regression tests
         shell: powershell
         run: ./scripts/test-adapter.ps1
+      - name: Reject inherited PowerShell module hijacking
+        run: node scripts/test-module-path.mjs
       - name: Rust unit tests and migrations
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
       - name: Rust static analysis
