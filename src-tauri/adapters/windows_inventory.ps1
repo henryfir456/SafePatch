@@ -2,6 +2,9 @@
 # stdout is private inventory JSON; errors are stable codes, never raw exception text.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Process-only restriction prevents inherited PowerShell 7 or user-module hijacking.
+# All autoloaded cmdlets must come from this Windows PowerShell installation.
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
 
 function Get-PathHash([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
@@ -78,12 +81,13 @@ function Convert-WinGetDocument($Document) {
     return @($records)
 }
 function Get-WinGetInventory {
-    $process = $null; $temp = $null
+    $process = $null; $temp = $null; $phase = 'DISCOVERY'
     try {
         # Only the registered Microsoft App Installer and valid Microsoft signature.
         $packages = @(Get-AppxPackage -Name Microsoft.DesktopAppInstaller -ErrorAction Stop | Where-Object { $_.Publisher -match '^CN=Microsoft Corporation,' } | Sort-Object Version -Descending)
         if ($packages.Count -eq 0) { throw 'WINGET_UNAVAILABLE' }
         $exe = Join-Path $packages[0].InstallLocation 'winget.exe'
+        $phase = 'SIGNATURE'
         $signature = Get-AuthenticodeSignature -LiteralPath $exe
         if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '^CN=Microsoft Corporation,') { throw 'WINGET_UNTRUSTED' }
         # WinGet list has no stable JSON mode. Export provides catalog ID/version only.
@@ -94,11 +98,13 @@ function Get-WinGetInventory {
         $info.Arguments='export --output "'+$temp+'" --include-versions --source winget --disable-interactivity'
         $info.UseShellExecute=$false; $info.CreateNoWindow=$true
         $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
+        $phase = 'LAUNCH'
         $process=[Diagnostics.Process]::new();$process.StartInfo=$info
         [void]$process.Start()
         # Drain streams concurrently; retain no output that could disclose inventory.
         $outTask=$process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null)
         $errTask=$process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        $phase = 'WAIT'
         $timer=[Diagnostics.Stopwatch]::StartNew()
         while (-not $process.WaitForExit(100)) {
             if(Test-Cancelled){$process.Kill();$process.WaitForExit();throw 'CANCELLED'}
@@ -107,12 +113,13 @@ function Get-WinGetInventory {
         [void]$outTask.GetAwaiter().GetResult();[void]$errTask.GetAwaiter().GetResult()
         if($process.ExitCode -ne 0){throw 'WINGET_COMMAND_FAILED'}
         if(-not [IO.File]::Exists($temp) -or ([IO.FileInfo]$temp).Length -gt 4194304){throw 'WINGET_INVALID_OUTPUT'}
+        $phase = 'PARSE'
         $document=[IO.File]::ReadAllText($temp) | ConvertFrom-Json
         $records=@(Convert-WinGetDocument $document)
         return [pscustomobject]@{records=$records;coverage=@([pscustomobject]@{scanner='winget';status='PARTIAL';count=$records.Count;codes=@('CATALOG_MATCHES_ONLY','PUBLISHER_NOT_EXPORTED','NON_WINGET_SOURCES_NOT_SCANNED')})}
     } catch {
         $code=[string]$_.Exception.Message
-        if($code -notmatch '^(WINGET_[A-Z_]+|CANCELLED)$'){$code='WINGET_READ_FAILED'}
+        if($code -notmatch '^(WINGET_[A-Z_]+|CANCELLED)$'){$code='WINGET_'+$phase+'_FAILED'}
         return [pscustomobject]@{records=@();coverage=@([pscustomobject]@{scanner='winget';status='UNKNOWN';count=0;codes=@($code)})}
     } finally {
         if($null -ne $process){if(-not $process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose()}
