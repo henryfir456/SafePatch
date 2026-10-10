@@ -3,6 +3,7 @@ pub mod model;
 pub mod windows;
 pub mod npm;
 mod project_files;
+pub mod npm_helper;
 mod instance;
 #[cfg(feature="desktop")]
 pub mod desktop;

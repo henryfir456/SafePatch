@@ -20,6 +20,24 @@ pub struct DependencyGraph {
     pub packages:Vec<DependencyPackage>,pub edges:Vec<DependencyEdge>,pub codes:Vec<String>,
 }
 pub use crate::project_files::read_npm_project;
+pub fn validate_graph(graph:&DependencyGraph)->Result<(),&'static str>{
+    let hex=|s:&str|s.len()==64&&s.bytes().all(|b|b.is_ascii_hexdigit());
+    if !hex(&graph.environment_id)||!hex(&graph.root_path_hash)||!hex(&graph.lockfile_hash)||!matches!(graph.lockfile_version,1..=3)
+        ||!matches!(graph.lockfile_kind.as_str(),"package-lock"|"npm-shrinkwrap"|"UNKNOWN")
+        ||chrono::DateTime::parse_from_rfc3339(&graph.observed_at).is_err()||graph.packages.len()>MAX_PACKAGES||graph.edges.len()>MAX_EDGES||graph.codes.len()>64
+        ||graph.codes.iter().any(|c|c.len()>80||!c.bytes().all(|b|b.is_ascii_uppercase()||b==b'_')){return Err("NPM_GRAPH_INVALID")}
+    let mut ids=BTreeSet::new();
+    for p in &graph.packages {
+        if !hex(&p.id)||!hex(&p.slot_hash)||!ids.insert(p.id.as_str())||!valid_name(&p.name)||p.version.as_deref().is_some_and(|v|!exact_version(v))
+            ||!matches!(p.direct_status.as_str(),"DIRECT"|"TRANSITIVE"|"UNKNOWN")||!matches!(p.source.as_str(),"PUBLIC_REGISTRY_METADATA"|"GIT_METADATA"|"LOCAL_OR_LINK_METADATA"|"UNKNOWN"){return Err("NPM_GRAPH_INVALID")}
+    }
+    let mut pairs=BTreeSet::new();
+    for e in &graph.edges {
+        if !ids.contains(e.from_id.as_str())||!ids.contains(e.to_id.as_str())||!pairs.insert((&e.from_id,&e.to_id))||e.kinds.is_empty()||e.kinds.len()>5
+            ||e.kinds.iter().any(|k|!matches!(k.as_str(),"DEPENDENCY"|"DEV"|"OPTIONAL"|"PEER"|"LINK_TARGET")){return Err("NPM_GRAPH_INVALID")}
+    }
+    Ok(())
+}
 struct Declaration {slot:String,descriptor:Map<String,Value>}
 fn check_cancel(cancel:&AtomicBool)->Result<(),&'static str>{if cancel.load(Ordering::Relaxed){Err("CANCELLED")}else{Ok(())}}
 fn valid_name(name:&str)->bool {
@@ -248,6 +266,22 @@ mod tests {
     #[test]fn unresolved_link_cannot_promote_an_extra_claimed_version(){
         let g=parse(json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"a":"file:../outside"}},"node_modules/a":{"link":true,"resolved":"../outside","version":"1.2.3"}}}));
         assert!(g.packages[0].version.is_none());
+    }
+    #[test]fn malformed_link_flags_cannot_promote_direct_or_target_versions(){
+        for malformed in [json!("true"),json!([]),json!({}),Value::Null]{
+            let direct=parse(json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"a":"*"}},"node_modules/a":{"link":malformed,"resolved":"../outside","version":"1.2.3"}}}));
+            assert!(direct.packages[0].version.is_none());assert_eq!(direct.packages[0].source,"UNKNOWN");
+            let linked=parse(json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"a":"*"}},"node_modules/a":{"link":true,"resolved":"packages/lib"},"packages/lib":{"name":"real-workspace","version":"1.2.3","link":malformed,"resolved":"../outside"}}}));
+            assert!(linked.packages.iter().all(|p|p.version.is_none()));
+            assert!(linked.codes.iter().any(|c|c=="NPM_LINK_METADATA_INVALID"));
+        }
+        let ordinary=parse(json!({"lockfileVersion":3,"packages":{"node_modules/a":{"link":false,"version":"1.2.3"}}}));
+        assert_eq!(ordinary.packages[0].version.as_deref(),Some("1.2.3"));
+    }
+    #[test]fn graph_boundary_rejects_cross_environment_edges_and_private_fields(){
+        let mut graph=parse(modern(3));assert!(validate_graph(&graph).is_ok());
+        graph.edges[0].to_id="f".repeat(64);assert_eq!(validate_graph(&graph),Err("NPM_GRAPH_INVALID"));
+        let mut graph=parse(modern(3));graph.packages[0].source="https://secret.invalid/private".into();assert_eq!(validate_graph(&graph),Err("NPM_GRAPH_INVALID"));
     }
     #[cfg(windows)]
     fn project_fixture(directory:&std::path::Path,name:&str){

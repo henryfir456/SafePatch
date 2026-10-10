@@ -32,14 +32,24 @@ mod local {
         let text=text.strip_prefix(r"\\?\").ok_or("NPM_METADATA_UNSAFE")?;
         let path=PathBuf::from(text);lexical_root(&path)?;Ok(path)
     }
-    struct Root {path:PathBuf,handle:File}
+    fn lexical_key(path:&Path)->String{path.to_string_lossy().replace('/',"\\").trim_end_matches('\\').to_ascii_lowercase()}
+    struct Root {path:PathBuf,handle:File,_ancestors:Vec<File>}
     impl Root {
         fn open(path:&Path)->Result<Self,&'static str>{
-            lexical_root(path)?;safe_ancestors(path)?;
-            if !fs::metadata(path).map_err(|_|"NPM_ROOT_INVALID")?.is_dir(){return Err("NPM_ROOT_INVALID")}
-            let handle=OpenOptions::new().read(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT).open(path).map_err(|_|"NPM_ROOT_UNREADABLE")?;
-            if handle.metadata().map_err(|_|"NPM_ROOT_UNREADABLE")?.file_attributes()&FILE_ATTRIBUTE_REPARSE_POINT!=0{return Err("NPM_METADATA_UNSAFE")}
-            let path=final_path(&handle)?;safe_ancestors(&path)?;Ok(Self{path,handle})
+            lexical_root(path)?;
+            // Acquire from drive root down. OPEN_REPARSE_POINT applies to each leaf;
+            // retained handles without DELETE sharing prevent ancestor replacement.
+            // Never promote unexpected final-path resolution to a trusted boundary.
+            let mut chain:Vec<_>=path.ancestors().collect();chain.reverse();let mut handles=Vec::new();
+            for ancestor in chain {
+                let handle=OpenOptions::new().read(true).share_mode(FILE_SHARE_READ|FILE_SHARE_WRITE)
+                    .custom_flags(FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT).open(ancestor).map_err(|_|"NPM_ROOT_UNREADABLE")?;
+                let metadata=handle.metadata().map_err(|_|"NPM_ROOT_UNREADABLE")?;
+                if !metadata.is_dir()||metadata.file_attributes()&FILE_ATTRIBUTE_REPARSE_POINT!=0||lexical_key(&final_path(&handle)?)!=lexical_key(ancestor){return Err("NPM_METADATA_UNSAFE")}
+                handles.push(handle);
+            }
+            let handle=handles.pop().ok_or("NPM_ROOT_INVALID")?;
+            let path=final_path(&handle)?;Ok(Self{path,handle,_ancestors:handles})
         }
         fn unchanged(&self)->Result<(),&'static str>{if final_path(&self.handle)?!=self.path{return Err("NPM_ROOT_CHANGED")}Ok(())}
         fn marker_exists(&self,name:&str)->bool{fs::symlink_metadata(self.path.join(name)).is_ok()}
