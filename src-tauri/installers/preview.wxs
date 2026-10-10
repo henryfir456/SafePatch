@@ -5,19 +5,13 @@
            Language="!(loc.TauriLanguage)" Manufacturer="{{manufacturer}}" Version="{{version}}">
     <Package Id="*" InstallerVersion="500" Compressed="yes"
              InstallScope="perUser" InstallPrivileges="limited" SummaryCodepage="!(loc.TauriCodepage)" />
-    <Condition Message="SafePatch Preview MSI supports current-user installation only. Remove ALLUSERS.">Installed OR NOT ALLUSERS</Condition>
+    <Condition Message="SafePatch Preview MSI supports current-user installation only. Remove ALLUSERS.">NOT ALLUSERS</Condition>
     <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer SafePatch Preview MSI is already installed." AllowSameVersionUpgrades="yes" />
     <Media Id="1" Cabinet="preview.cab" EmbedCab="yes" />
     <Icon Id="ProductIcon" SourceFile="{{icon_path}}" />
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPNOREPAIR" Value="1" />
-    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
-    <UIRef Id="WixUI_InstallDir" />
-    <UI>
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">1</Publish>
-      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">1</Publish>
-    </UI>
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="LocalAppDataFolder">
         <Directory Id="UserPrograms" Name="Programs">
