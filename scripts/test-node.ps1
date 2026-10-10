@@ -35,6 +35,12 @@ Assert ((Get-NodeSupport '26.0.0' $schedule '2026-10-10').status -eq 'CURRENT') 
 Assert ((Get-NodeSupport '99.0.0' $schedule '2026-10-10').status -eq 'UNKNOWN') 'missing release schedule is UNKNOWN'
 Assert ((Get-NodeSupport '24.0.0-beta' $schedule '2026-10-10').status -eq 'UNKNOWN') 'prerelease support is UNKNOWN'
 Assert ((Get-NodeSupport '24.20.0' $schedule '2026-12-10').status -eq 'UNKNOWN') 'stale schedule cannot establish support'
+$originalCulture=[Threading.Thread]::CurrentThread.CurrentCulture
+try{
+    [Threading.Thread]::CurrentThread.CurrentCulture=[Globalization.CultureInfo]::GetCultureInfo('th-TH')
+    $invariant=Get-NodeSupport '24.20.0' $schedule '2026-10-10'
+    Assert ($invariant.checked_at -ceq '2026-10-10' -and $invariant.end_date -ceq '2028-04-30') 'lifecycle source dates use invariant Gregorian calendar'
+}finally{[Threading.Thread]::CurrentThread.CurrentCulture=$originalCulture}
 $tempBase=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
 $testRoot=[IO.Path]::GetFullPath((Join-Path $tempBase ('safepatch-node-tests-'+[guid]::NewGuid().ToString('N'))))
 if(-not $testRoot.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase)){throw 'TEST_ROOT_OUTSIDE_TEMP'}
@@ -52,4 +58,4 @@ try{
     $resolved=[IO.Path]::GetFullPath($testRoot)
     if($resolved.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase) -and [IO.Directory]::Exists($resolved)){Remove-Item -LiteralPath $resolved -Recurse -Force}
 }
-Write-Output 'Node metadata assertions: PASS (20). Authored metadata/files; not device acceptance.'
+Write-Output 'Node metadata assertions: PASS (21). Authored metadata/files; not device acceptance.'

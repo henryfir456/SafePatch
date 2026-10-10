@@ -21,3 +21,5 @@ M1's real inventory vertical slice is implemented and passed automated native We
 See [Windows development and operation](docs/WINDOWS_DEVELOPMENT.md) and the explicit [M1 verification record](docs/M1_VERIFICATION.md). Missing tools or a passing fixture test do not establish Windows end-to-end acceptance. Related issues: #2, #3, #4, #13.
 
 M2 #5 adds read-only VS Code/application/extension/profile metadata to the same scan and passed Windows 11 native WebView scan/cancel/restart acceptance. See [VS Code verification and coverage](docs/M2_VSCODE_VERIFICATION.md) for evidence and explicit limitations. Node, npm, Python and Git collectors remain pending (#6–#9).
+
+M2 #6 adds distinct Node runtime metadata and offline support lifecycle; see [Node verification/coverage](docs/M2_NODE_VERIFICATION.md) for the current pending gates. Support lifecycle is independent of vulnerability applicability.

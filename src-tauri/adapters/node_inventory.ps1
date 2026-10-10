@@ -12,13 +12,13 @@ function Get-NodeScheduleDate($Document,[string]$Field) {
     if($value -isnot [string]){throw 'NODE_SCHEDULE_INVALID'}
     return [DateTime]::ParseExact($value,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)
 }
-function Get-NodeSupport($Version,$Schedule,[string]$Today=([DateTime]::UtcNow.ToString('yyyy-MM-dd'))) {
+function Get-NodeSupport($Version,$Schedule,[string]$Today=([DateTime]::UtcNow.ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture))) {
     $result=[pscustomobject]@{status='UNKNOWN';end_date=$null;source_url='https://github.com/nodejs/Release/blob/main/schedule.json';checked_at=$null;evaluated_at=$Today}
     try{
         $now=[DateTime]::ParseExact($Today,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)
         $checked=Get-NodeScheduleDate $Schedule 'checked_at'
         if($null -eq $checked){return $result}
-        $result.checked_at=$checked.ToString('yyyy-MM-dd')
+        $result.checked_at=$checked.ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)
         if(($now-$checked).TotalDays -lt 0 -or ($now-$checked).TotalDays -gt 30){return $result}
         if($Version -isnot [string] -or $Version.Length -gt 256 -or $Version -cnotmatch '\Av?([0-9]+)\.[0-9]+\.[0-9]+(?:\+[0-9A-Za-z.-]+)?\z'){return $result}
         $majorKey='v'+$Matches[1]
@@ -29,7 +29,7 @@ function Get-NodeSupport($Version,$Schedule,[string]$Today=([DateTime]::UtcNow.T
         if(($null -ne $lts -and ($lts -lt $start -or $lts -gt $end)) -or
             ($null -ne $maintenance -and ($maintenance -lt $start -or $maintenance -gt $end)) -or
             ($null -ne $lts -and $null -ne $maintenance -and $maintenance -lt $lts)){return $result}
-        $result.end_date=$end.ToString('yyyy-MM-dd')
+        $result.end_date=$end.ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)
         $result.status=if($now -ge $end){'EOL'}elseif($null -ne $maintenance -and $now -ge $maintenance){if($null -ne $lts -and $now -ge $lts){'MAINTENANCE_LTS'}else{'MAINTENANCE'}}elseif($null -ne $lts -and $now -ge $lts){'ACTIVE_LTS'}else{'CURRENT'}
     }catch{$result.status='UNKNOWN';$result.end_date=$null}
     return $result

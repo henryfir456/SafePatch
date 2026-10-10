@@ -1,0 +1,20 @@
+# Node runtime inventory (#6)
+
+The Windows scan reads PE version resources without invoking discovered `node.exe`. Default user/system Node paths, nvm/fnm/Volta/NVS version directories and PATH are candidates; PATH is not complete inventory. Canonical path hashes identify distinct runtimes. PE OriginalFilename/ProductName must claim Node before a version is assigned; otherwise the candidate and version remain UNKNOWN. CompanyName is unverified metadata. Install origin remains UNKNOWN; a directory hint is not an installation proof.
+
+Support lifecycle is independent of vulnerability applicability. A local snapshot of the [official Node release schedule](https://github.com/nodejs/Release/blob/main/schedule.json), checked 2026-10-10, covers majors 14,16,18,20,22,24,25,26. CURRENT, ACTIVE_LTS, MAINTENANCE_LTS, MAINTENANCE and EOL are explicit states. Missing/invalid/prerelease versions, unlisted releases, future-dated data and data older than 30 days yield UNKNOWN. Dates use the invariant Gregorian calendar. Scans make no network request to refresh this data or submit runtime information. A supported runtime is not a vulnerability-safe verdict.
+
+## Bounds and failure behavior
+
+Metadata reads reject network/UNC paths, alternate streams and any ancestor reparse point. Each manager root considers up to 64 version directories; PATH discovery is limited to 256 entries. At most 200 distinct runtime candidates, 256 MiB per candidate and 15 seconds are allowed. Enumeration/resource errors retain the other collectors and explicit partial coverage. Same-path discovery hints deduplicate; different paths/versions remain distinct. Arbitrary/custom roots, reparse-managed links, unlisted managers and historical lifecycle releases outside the snapshot remain coverage gaps. Concurrent path replacement remains a limitation of path-based access.
+
+The combined owned-process watchdog is 145 seconds; real probe and native acceptance bounds are 165 and 200 seconds. No package install, script, version-manager command, untrusted runtime or privilege elevation is performed. Only path hashes and selected version-resource fields cross IPC. Support status/source/checked date persist in immutable SQLite snapshots and render separately from identity/duplicate status.
+
+## Current validation gates
+
+- Windows 11 Home build 26200, current non-admin user: UI 8 tests, SQLite 4 tests, Windows adapter 13 assertions, VS Code 29 assertions, Node 21 assertions, TypeScript build and inherited module-path trap pass. Node tests use authored metadata/files, including non-PE candidates and Thai culture; fixtures do not establish device acceptance.
+- Real Node adapter: 2 distinct paths, 2 known versions, no unknown identities, approximately 0.6 seconds. Exact combined stdin/stdout adapter: 243 raw records, Node 2/PARTIAL; Registry/WinGet and all 10 indexed extension profiles retained, stderr 0. Full inventory, paths and environment values stay local.
+- Rust tests/Clippy/Windows build and digest-verified native WebView scan/cancel/restart acceptance for this issue are PENDING. No local Rust/MSVC/SDK installation; hosted builds will supply own binaries for real device verification.
+- Windows 10, human-visible/manual UI and installer acceptance remain NOT VERIFIED. No vulnerability matching is implemented by this issue.
+
+PE field reference: [official Node resource definition](https://github.com/nodejs/node/blob/main/src/res/node.rc). Reader reference: [Microsoft FileVersionInfo.GetVersionInfo](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.fileversioninfo.getversioninfo).
