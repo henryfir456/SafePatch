@@ -56,7 +56,7 @@ jobs:
         shell: powershell
         run: ./scripts/test-preview-contracts.ps1
       - name: Production Windows EXE and MSI bundles
-        run: npm run tauri -- build -- --locked
+        run: npm run tauri -- build --verbose --no-binary-patching -- --locked
       - name: Verify compiled production packages and stage Preview
         shell: pwsh
         run: ./scripts/prepare-preview-artifact.ps1
