@@ -1,8 +1,10 @@
-# Owned clean CI only; never a user-machine cleanup script.
+﻿# Owned clean CI only; never a user-machine cleanup script.
 param([Parameter(Mandatory=$true)][string]$StagePath)
 $ErrorActionPreference='Stop'
 if($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted'){throw 'PREVIEW_CI_ONLY'}
 $report=@{status='NOT_VERIFIED';host='GitHub Windows Server';user_windows_10_11='NOT_VERIFIED';token='restricted same-user token';is_admin=$null;exe_install='NOT_VERIFIED';msi_install='NOT_VERIFIED';payload_identity='NOT_VERIFIED';launch='NOT_VERIFIED';windows_scan='NOT_VERIFIED';cancel='NOT_VERIFIED';npm_scan='NOT_VERIFIED';restart='NOT_VERIFIED';uninstall_retention='NOT_VERIFIED';code='UNREACHED'}
+$uiaEstablished=$false
+. (Join-Path $env:GITHUB_WORKSPACE 'scripts\preview-contracts.ps1')
 $exeApp=$null;$msiApp=$null;$exeInstalled=$false;$msiInstalled=$false;$sentinel=$null
 $exeDir=Join-Path $StagePath 'owned-exe-install';$msiDir=Join-Path $StagePath 'owned-msi-install'
 $dataRoot=Join-Path $env:LOCALAPPDATA 'io.github.henryfir456.safepatch';$db=Join-Path $dataRoot 'inventory.sqlite'
@@ -44,6 +46,8 @@ try {
  while(-not(Test-Path -LiteralPath $db)){if([DateTime]::UtcNow -gt $end){throw 'PREVIEW_DATABASE_NOT_CREATED'};Start-Sleep -Milliseconds 100}
  $report.launch='PASS'
  try {
+  $end=[DateTime]::UtcNow.AddSeconds(25);while(-not(Control $root '開始唯讀掃描')){if([DateTime]::UtcNow -gt $end){throw 'PREVIEW_UIA_PROVIDER_UNAVAILABLE'};Start-Sleep -Milliseconds 100}
+  $uiaEstablished=$true
   Click $root '開始唯讀掃描';$s=Wait-Stats 'windows' @('COMPLETE','PARTIAL')
   if($s.schema -ne 3 -or $s.fk_errors -ne 0 -or $s.assets -le 0){throw 'PREVIEW_WINDOWS_SNAPSHOT_INVALID'}
   $report.windows_scan='PASS';$report.assets=$s.assets;$scanId=$s.windows.id
@@ -65,7 +69,7 @@ try {
   if($reopened.npm.id -ne $npmId -or $reopened.windows.status -ne 'CANCELLED' -or $reopened.packages -ne $n.packages){throw 'PREVIEW_RESTART_MISMATCH'}
   $report.restart='PASS';$report.status='PASS';$report.code=$null
  }catch {
-  if($_.Exception.Message -like 'PREVIEW_UIA_*'){$report.code='UIA_UNAVAILABLE';$report.status='NOT_VERIFIED'}else{throw}
+  if((Get-PreviewUiFailureStatus $uiaEstablished $_.Exception.Message) -eq 'NOT_VERIFIED'){$report.code='UIA_UNAVAILABLE';$report.status='NOT_VERIFIED'}else{throw}
  }
 } catch {$report.status='FAILED';$code=$_.Exception.Message;$report.code=if($code -match '^PREVIEW_[A-Z_]+$'){$code}else{'PREVIEW_LIFECYCLE_FAILED'}}
 finally {
