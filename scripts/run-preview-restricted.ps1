@@ -55,3 +55,5 @@ try {
  }
  Write-Output 'Preview restricted-token lifecycle: NOT VERIFIED (see aggregate report).'
 }
+
+if(Test-Path -LiteralPath $report){$result=Get-Content -LiteralPath $report -Raw|ConvertFrom-Json;if($result.status -eq 'FAILED'){throw 'PREVIEW_LIFECYCLE_FAILED'}}
