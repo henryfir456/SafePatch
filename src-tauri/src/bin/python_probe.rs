@@ -20,4 +20,8 @@ fn run()->Result<(),String>{
     if serde_json::to_string(&reopened.python_snapshot(&scan.id)?.ok_or("PROBE_REOPEN_MISSING")?).map_err(|_|"PROBE_SERIALIZATION")?!=serialized{return Err("PROBE_REOPEN_MISMATCH".into())}
     println!("{}",serde_json::json!({"passed":true,"packages":snapshot.packages.len(),"versions":snapshot.packages.iter().filter(|p|p.version.is_some()).count(),"interpreters":snapshot.interpreters.len(),"interpreter_versions":snapshot.interpreters.iter().filter(|p|p.version.is_some()).count(),"unknown_relationships":snapshot.packages.iter().filter(|p|p.direct_status=="UNKNOWN").count(),"venv_metadata":snapshot.venv_metadata.is_some(),"cancellation":true,"reopen_exact":true,"duration_ms":started.elapsed().as_millis()}));Ok(())
 }
-fn main(){if safepatch_lib::python_helper::run_if_requested(){return;}if let Err(code)=run(){eprintln!("{code}");std::process::exit(1);}}
+fn main(){
+    if safepatch_lib::python_helper::run_if_requested(){return;}
+    if let Err(code)=run(){eprintln!("{code}");std::process::exit(1);}
+}
+
