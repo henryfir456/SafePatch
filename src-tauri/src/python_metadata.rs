@@ -40,10 +40,10 @@ pub fn exact_version(value:&str)->bool {
     if let Some(next)=suffix(rest,&["dev"]){rest=next;}
     rest.is_empty()
 }
-fn valid_name(name:&str)->bool{
+pub(crate) fn valid_name(name:&str)->bool{
     !name.is_empty()&&name.len()<=214&&name.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)&&name.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)&&name.bytes().all(|c|c.is_ascii_alphanumeric()||matches!(c,b'.'|b'_'|b'-'))
 }
-fn normalized_name(name:&str)->String{
+pub(crate) fn normalized_name(name:&str)->String{
     let mut result=String::new();let mut previous_separator=false;
     for c in name.bytes(){if matches!(c,b'.'|b'_'|b'-'){if !previous_separator{result.push('-')}previous_separator=true;}else{result.push(c.to_ascii_lowercase() as char);previous_separator=false;}}
     result
