@@ -1,4 +1,4 @@
-name: Windows M1
+name: Windows Preview
 on:
   pull_request:
   push:
@@ -7,8 +7,10 @@ permissions:
   contents: read
 jobs:
   validate:
-    runs-on: windows-latest
-    timeout-minutes: 35
+    runs-on: windows-2025
+    timeout-minutes: 40
+    env:
+      RUSTFLAGS: '-C target-feature=+crt-static'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -38,29 +40,55 @@ jobs:
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
       - name: Rust static analysis
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-      - name: Windows Tauri build
-        run: npm run tauri -- build --no-bundle -- --locked
+      - name: Parse Preview CI scripts
+        shell: pwsh
+        run: |
+          Get-ChildItem scripts/*preview*.ps1 | ForEach-Object {
+            $tokens=$null; $errors=$null
+            $null=[System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors)
+            if ($errors.Count) { throw 'PREVIEW_SCRIPT_PARSE_FAILED' }
+          }
+          if (git ls-files src/PythonInventory.tsx src-tauri/src/python.rs) { throw 'PREVIEW_UNAPPROVED_SCOPE' }
+      - name: Production Windows EXE and MSI bundles
+        run: npm run tauri -- build -- --locked
+      - name: Verify compiled production packages and stage Preview
+        shell: pwsh
+        run: ./scripts/prepare-preview-artifact.ps1
+      - name: Restricted-token owned installer and application lifecycle
+        shell: pwsh
+        run: |
+          $env:PREVIEW_NODE=(Get-Command node.exe).Source
+          ./scripts/run-preview-restricted.ps1 -ScriptPath ./scripts/verify-preview-lifecycle.ps1 -StagePath $env:PREVIEW_STAGE
       - name: Build real inventory integration probe
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin inventory_probe
       - name: Build opt-in npm project integration probe
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin npm_probe
-      - name: Build instrumented real WebView acceptance executable
-        run: |
-          Copy-Item src-tauri/target/release/safepatch.exe src-tauri/target/release/safepatch-production.exe
-          cargo build --locked --manifest-path src-tauri/Cargo.toml --release --features acceptance --bin safepatch
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item src-tauri/target/release/safepatch.exe src-tauri/target/release/safepatch-acceptance.exe
-          Copy-Item src-tauri/target/release/safepatch-production.exe src-tauri/target/release/safepatch.exe
+      - name: Build isolated native acceptance executable
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-acceptance --release --features acceptance --bin safepatch
+      - name: Seal production Preview identity and checksums
+        shell: pwsh
+        run: ./scripts/prepare-preview-artifact.ps1 -Seal
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: SafePatch-Windows-Preview-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            ${{ env.PREVIEW_STAGE }}/*.exe
+            ${{ env.PREVIEW_STAGE }}/*.msi
+            ${{ env.PREVIEW_STAGE }}/README.md
+            ${{ env.PREVIEW_STAGE }}/manifest.json
+            ${{ env.PREVIEW_STAGE }}/ci-*.json
+            ${{ env.PREVIEW_STAGE }}/SHA256SUMS.txt
+          retention-days: 30
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: windows-m1-build
+          name: windows-native-validation-${{ github.sha }}
           if-no-files-found: warn
           path: |
             src-tauri/Cargo.lock
-            src-tauri/target/release/safepatch.exe
-            src-tauri/target/release/safepatch-production.exe
-            src-tauri/target/release/safepatch-acceptance.exe
+            src-tauri/target-acceptance/release/safepatch.exe
             src-tauri/target/debug/inventory_probe.exe
             src-tauri/target/debug/npm_probe.exe
+            ${{ env.PREVIEW_STAGE }}/ci-*.json
           retention-days: 7
