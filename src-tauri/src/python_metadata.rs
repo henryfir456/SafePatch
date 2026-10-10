@@ -155,6 +155,14 @@ mod tests {
         assert!(invalid.declared_version.is_none()&&invalid.include_system_packages.is_none());assert!(invalid.codes.contains(&"PYTHON_VENV_CONFIG_PARTIAL".into()));
     }
     #[test]
+    fn current_core_metadata_versions_and_ascii_names_are_supported() {
+        for format in ["1.0","1.1","1.2","2.1","2.2","2.3","2.4","2.5","2.6"] {
+            let bytes=format!("Metadata-Version: {format}\nName: naive\nVersion: 1.0\n\n");
+            assert_eq!(parse_distribution(bytes.as_bytes(),None).unwrap().name,"naive");
+        }
+        assert_eq!(parse_distribution(b"Metadata-Version: 2.0\nName: naive\nVersion: 1.0\n\n",None).err(),Some("PYTHON_METADATA_FORMAT_UNSUPPORTED"));
+    }
+    #[test]
     fn corrupt_oversized_and_future_metadata_have_stable_errors() {
         assert_eq!(parse_distribution(&vec![b'a';MAX_METADATA_BYTES+1],None).err(),Some("PYTHON_METADATA_SIZE_LIMIT"));
         assert_eq!(parse_distribution(&[0xff],None).err(),Some("PYTHON_METADATA_INVALID"));
