@@ -1,6 +1,8 @@
 # SafePatch
 
-Local-first Windows software and developer-environment security health checker.
+Local-first Windows software and developer-environment inventory.
+
+Windows Preview 0.1.0 packages only the verified Windows, VS Code, Node.js and npm inventory on main. [Preview installation, hashes and verification limits](docs/WINDOWS_PREVIEW.md) explain the current-user EXE/MSI packages and WebView2 prerequisite. No Rust/Node/VS Code development environment is needed to run the installed app. Python/Git, CVE analysis and automatic security updates are not included; the broader scope below is the paused roadmap.
 
 ## Scope
 - Windows 10/11 installed software inventory via WinGet and Registry
