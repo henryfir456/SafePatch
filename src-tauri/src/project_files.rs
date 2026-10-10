@@ -109,6 +109,19 @@ mod local {
             assert!(root.unchanged().is_ok());drop(root);
             fs::rename(&parent,temporary.path().join("outside")).unwrap();
         }
+        #[test]fn junction_root_and_junction_ancestor_cannot_read_outside_metadata(){
+            #[link(name="kernel32")]
+            extern "system" {fn GetWindowsDirectoryW(buffer:*mut u16,size:u32)->u32;}
+            let mut buffer=[0u16;32768];let count=unsafe{GetWindowsDirectoryW(buffer.as_mut_ptr(),buffer.len() as u32)} as usize;
+            assert!(count>0&&count<buffer.len());let cmd=PathBuf::from(String::from_utf16(&buffer[..count]).unwrap()).join("System32/cmd.exe");
+            let temporary=tempfile::tempdir().unwrap();let target=temporary.path().join("outside");let leaf=target.join("project");fs::create_dir_all(&leaf).unwrap();
+            fs::write(leaf.join("package-lock.json"),br#"{"lockfileVersion":3,"packages":{}}"#).unwrap();
+            let junction=temporary.path().join("selected");
+            let status=std::process::Command::new(cmd).args(["/d","/c","mklink","/J"]).arg(&junction).arg(&target).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().unwrap();assert!(status.success());
+            assert_eq!(Root::open(&junction).err(),Some("NPM_METADATA_UNSAFE"));
+            assert_eq!(read(&junction.join("project"),&AtomicBool::new(false)).err(),Some("NPM_METADATA_UNSAFE"));
+            fs::remove_dir(&junction).unwrap();assert!(leaf.join("package-lock.json").is_file());
+        }
     }
 }
 #[cfg(windows)]

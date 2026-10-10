@@ -23,4 +23,7 @@ fn run()->Result<(),String>{
     if metadata_hashes(&root)!=before{return Err("PROBE_PROJECT_CHANGED".into())}
     println!("{}",serde_json::json!({"passed":true,"packages":graph.packages.len(),"edges":graph.edges.len(),"versions":graph.packages.iter().filter(|p|p.version.is_some()).count(),"direct":graph.packages.iter().filter(|p|p.direct_status=="DIRECT").count(),"transitive":graph.packages.iter().filter(|p|p.direct_status=="TRANSITIVE").count(),"unknown_relation":graph.packages.iter().filter(|p|p.direct_status=="UNKNOWN").count(),"lockfile_kind":graph.lockfile_kind,"lockfile_version":graph.lockfile_version,"cancellation":true,"readonly_unchanged":true,"reopen_exact":true,"duration_ms":started.elapsed().as_millis()}));Ok(())
 }
-fn main(){if safepatch_lib::npm_helper::run_if_requested(){return}if let Err(code)=run(){eprintln!("{code}");std::process::exit(1);}}
+fn main(){
+    if safepatch_lib::npm_helper::run_if_requested(){return;}
+    if let Err(code)=run(){eprintln!("{code}");std::process::exit(1);}
+}
