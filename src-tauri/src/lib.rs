@@ -56,6 +56,7 @@ impl ScanService {
     }
     fn complete_project(&self,result:Result<npm::DependencyGraph,String>,cancelled:bool){
         if let Ok(mut guard)=self.active.lock(){if let Some(active)=guard.as_mut(){
+            let cancelled=cancelled||active.cancel.load(Ordering::Relaxed);
             let graph=match result{
                 Ok(graph) if !cancelled=>{active.scan.status="PARTIAL".into();active.scan.coverage=vec![model::Coverage{scanner:"npm-lockfile".into(),status:"PARTIAL".into(),count:graph.packages.len(),codes:graph.codes.clone()}];Some(graph)},
                 Ok(_)=>{active.scan.status="CANCELLED".into();None},
@@ -82,6 +83,7 @@ impl ScanService {
     }
     fn complete_python(&self,result:Result<python::PythonSnapshot,String>,cancelled:bool){
         if let Ok(mut guard)=self.active.lock(){if let Some(active)=guard.as_mut(){
+            let cancelled=cancelled||active.cancel.load(Ordering::Relaxed);
             let snapshot=match result{
                 Ok(snapshot) if !cancelled=>{active.scan.status="PARTIAL".into();active.scan.coverage=vec![model::Coverage{scanner:"python-dist-info".into(),status:"PARTIAL".into(),count:snapshot.packages.len(),codes:snapshot.codes.clone()}];Some(snapshot)},
                 Ok(_)=>{active.scan.status="CANCELLED".into();None},
@@ -93,6 +95,7 @@ impl ScanService {
     }
     fn complete(&self,result:Result<(Vec<Asset>,Vec<model::Coverage>),String>,cancelled:bool){
         if let Ok(mut guard)=self.active.lock(){if let Some(active)=guard.as_mut(){
+            let cancelled=cancelled||active.cancel.load(Ordering::Relaxed);
             active.scan.phase="saving local results".into();active.scan.progress=90;
             let assets=match result{Ok((assets,coverage))=>{active.scan.coverage=coverage;active.scan.status=if cancelled{"CANCELLED"}else if active.scan.coverage.iter().all(|c|c.status=="COMPLETE"){"COMPLETE"}else{"PARTIAL"}.into();assets},Err(code)=>{active.scan.status=if cancelled{"CANCELLED"}else{"FAILED"}.into();active.scan.error_code=Some(code);vec![]}};
             active.scan.finished_at=Some(chrono::Utc::now().to_rfc3339());active.scan.phase="finished".into();active.scan.progress=100;
