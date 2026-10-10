@@ -6,8 +6,7 @@
   const buttons=()=>[...document.querySelectorAll('button')];
   const start=()=>buttons().find(b=>b.textContent==='開始唯讀掃描');
   try{
-    await wait(()=>!!start());
-    await new Promise(r=>setTimeout(r,300));
+    await wait(()=>start()&&!start().disabled);
     const mode=await invoke('acceptance_mode');
     let cancellation=false;
     if(mode==='scan'){
