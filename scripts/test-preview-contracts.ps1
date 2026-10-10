@@ -22,20 +22,26 @@ Write-Output 'Preview contracts: 5 failure cases, BOM, selected-shell parse/lite
 # COM-like optional-method returns must not leak nulls into the row collection.
 class PreviewFakeRecord {
  [int]$FieldCount=2
- [string]StringData([int]$index){return @('ALLUSERS','')[$index-1]}
+ [string]StringData([int]$index){if($this.FieldCount -eq 1){return 'NOT ALLUSERS'};return @('ALLUSERS','')[$index-1]}
 }
 class PreviewFakeView {
  [int]$Cursor=0
+ [int]$Columns=2
  [object]Execute(){return $null}
- [object]Fetch(){if($this.Cursor -eq 0){$this.Cursor=1;return [PreviewFakeRecord]::new()};return $null}
+ [object]Fetch(){if($this.Cursor -eq 0){$this.Cursor=1;$r=[PreviewFakeRecord]::new();$r.FieldCount=$this.Columns;return $r};return $null}
  [object]Close(){return $null}
 }
 class PreviewFakeDatabase {
- [PreviewFakeView]OpenView([string]$sql){$v=[PreviewFakeView]::new();if($sql -eq 'empty'){$v.Cursor=1};return $v}
+ [PreviewFakeView]OpenView([string]$sql){$v=[PreviewFakeView]::new();if($sql -eq 'empty'){$v.Cursor=1};if($sql -eq 'single-column'){$v.Columns=1};return $v}
 }
 $fake=[PreviewFakeDatabase]::new()
 $rows=Read-PreviewMsiRows $fake 'one'
-if($rows.Count -ne 1 -or $rows[0].Count -ne 2 -or $rows[0][0] -ne 'ALLUSERS' -or $rows[0][1] -ne ''){throw 'PREVIEW_MSI_ROW_SHAPE_REGRESSION'}
+if($rows.Count -ne 1 -or $rows[0].Fields.Count -ne 2 -or $rows[0].Fields[0] -ne 'ALLUSERS' -or $rows[0].Fields[1] -ne ''){throw 'PREVIEW_MSI_ROW_SHAPE_REGRESSION'}
 $empty=Read-PreviewMsiRows $fake 'empty'
 if($empty.Count -ne 0){throw 'PREVIEW_MSI_EMPTY_ROWS_REGRESSION'}
 Write-Output 'Preview MSI row contracts: populated/empty COM-like views PASS'
+
+$single=Read-PreviewMsiRows $fake 'single-column'
+if($single.Count -ne 1 -or $single[0].Fields.Count -ne 1 -or $single[0].Fields[0] -ne 'NOT ALLUSERS'){throw 'PREVIEW_MSI_SINGLE_COLUMN_REGRESSION'}
+if(@($single|Where-Object{$_.Fields[0] -eq 'NOT ALLUSERS'}).Count -ne 1){throw 'PREVIEW_MSI_SINGLE_COLUMN_PIPELINE_REGRESSION'}
+Write-Output 'Preview MSI single-column pipeline contract PASS'

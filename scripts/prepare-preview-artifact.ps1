@@ -48,16 +48,16 @@ $installer=New-Object -ComObject WindowsInstaller.Installer
 $db=$installer.OpenDatabase($msi.FullName,0)
 function Rows($sql){return ,(Read-PreviewMsiRows $db $sql)}
 $properties=Rows 'SELECT Property, Value FROM Property'
-if(@($properties|Where-Object{$_[0] -eq 'ALLUSERS' -and $_[1]}).Count -ne 0){throw 'PREVIEW_MSI_ALLUSERS'}
+if(@($properties|Where-Object{$_.Fields[0] -eq 'ALLUSERS' -and $_.Fields[1]}).Count -ne 0){throw 'PREVIEW_MSI_ALLUSERS'}
 $privileges=[int]$db.SummaryInformation(0).Property(15)
 if(($privileges -band 8) -ne 8){throw 'PREVIEW_MSI_ELEVATION_REQUIRED'}
 $conditions=Rows 'SELECT Condition FROM LaunchCondition'
-if(-not($conditions|Where-Object{$_[0] -match 'NOT ALLUSERS'})){throw 'PREVIEW_MSI_OVERRIDE_UNGUARDED'}
+if(-not($conditions|Where-Object{$_.Fields[0] -match 'NOT ALLUSERS'})){throw 'PREVIEW_MSI_OVERRIDE_UNGUARDED'}
 $registry=Rows 'SELECT Root FROM Registry'
-if(@($registry|Where-Object{$_[0] -ne '1'}).Count -ne 0){throw 'PREVIEW_MSI_MACHINE_REGISTRY'}
+if(@($registry|Where-Object{$_.Fields[0] -ne '1'}).Count -ne 0){throw 'PREVIEW_MSI_MACHINE_REGISTRY'}
 $tables=Rows 'SELECT Name FROM _Tables'
-$actions=if($tables|Where-Object{$_[0] -eq 'CustomAction'}){Rows 'SELECT Type FROM CustomAction'}else{@()}
-if(@($actions|Where-Object{([int]$_[0] -band 63) -ne 51}).Count -ne 0){throw 'PREVIEW_MSI_EXECUTION_ACTION'}
+$actions=if($tables|Where-Object{$_.Fields[0] -eq 'CustomAction'}){Rows 'SELECT Type FROM CustomAction'}else{@()}
+if(@($actions|Where-Object{([int]$_.Fields[0] -band 63) -ne 51}).Count -ne 0){throw 'PREVIEW_MSI_EXECUTION_ACTION'}
 # Extract both real compiled payloads using the runner's existing 7-Zip.
 $seven=(Get-Command 7z.exe -ErrorAction Stop).Source
 foreach($package in @((Get-ChildItem -LiteralPath $stage -Filter '*-setup.exe'),$msi)){

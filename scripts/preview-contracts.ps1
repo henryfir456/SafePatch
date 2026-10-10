@@ -6,13 +6,13 @@ function Get-PreviewUiFailureStatus([bool]$ProviderEstablished,[string]$Code) {
 
 function Read-PreviewMsiRows($Database,[string]$Sql) {
  $view=$Database.OpenView($Sql)
- $null=$view.Execute()
  $result=@()
  try {
+  $null=$view.Execute()
   while($record=$view.Fetch()){
    $row=@()
    for($i=1;$i -le $record.FieldCount;$i++){$row+=$record.StringData($i)}
-   $result+=,@($row)
+   $result+=[pscustomobject]@{Fields=@($row)}
   }
  } finally {$null=$view.Close()}
  return ,$result
