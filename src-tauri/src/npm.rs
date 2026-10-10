@@ -16,8 +16,10 @@ pub struct DependencyEdge {pub from_id:String,pub to_id:String,pub kinds:Vec<Str
 #[derive(Clone,Debug,Serialize,Deserialize)]
 pub struct DependencyGraph {
     pub environment_id:String,pub lockfile_version:u8,pub lockfile_hash:String,
+    pub lockfile_kind:String,pub root_path_hash:String,pub observed_at:String,
     pub packages:Vec<DependencyPackage>,pub edges:Vec<DependencyEdge>,pub codes:Vec<String>,
 }
+pub use crate::project_files::read_npm_project;
 struct Declaration {slot:String,descriptor:Map<String,Value>}
 fn check_cancel(cancel:&AtomicBool)->Result<(),&'static str>{if cancel.load(Ordering::Relaxed){Err("CANCELLED")}else{Ok(())}}
 fn valid_name(name:&str)->bool {
@@ -131,7 +133,7 @@ pub fn parse_lock(bytes:&[u8],environment_id:&str,manifest:Option<&[u8]>,cancel:
         let version=if is_link&&target_slot.is_none(){None}else{version_descriptor.get("version").and_then(Value::as_str).filter(|v|exact_version(v)).map(str::to_owned)};
         if version.is_none(){codes.insert("NPM_VERSION_UNKNOWN".into());}
         let index=packages.len();slots.insert(entry.slot.clone(),index);
-        if let Some(target)=target_slot{link_targets.insert(entry.slot.clone(),target);}
+        if let Some(target)=target_slot.as_ref(){link_targets.insert(entry.slot.clone(),target.clone());}
         packages.push(DependencyPackage{id:hash(&format!("{environment_id}\0{}",entry.slot)),name:name.into(),version,direct_status:"UNKNOWN".into(),source:source_kind(&entry.descriptor),slot_hash:hash(&entry.slot)});
         descriptors.push(entry);
     }
@@ -161,7 +163,7 @@ pub fn parse_lock(bytes:&[u8],environment_id:&str,manifest:Option<&[u8]>,cancel:
         }
     }
     check_cancel(cancel)?;
-    Ok(DependencyGraph{environment_id:environment_id.into(),lockfile_version:version,lockfile_hash:hash(&String::from_utf8_lossy(bytes)),packages,edges:edges.into_iter().map(|((from_id,to_id),kinds)|DependencyEdge{from_id,to_id,kinds:kinds.into_iter().collect()}).collect(),codes:codes.into_iter().collect()})
+    Ok(DependencyGraph{environment_id:environment_id.into(),lockfile_version:version,lockfile_hash:hash(&String::from_utf8_lossy(bytes)),lockfile_kind:"UNKNOWN".into(),root_path_hash:environment_id.into(),observed_at:chrono::Utc::now().to_rfc3339(),packages,edges:edges.into_iter().map(|((from_id,to_id),kinds)|DependencyEdge{from_id,to_id,kinds:kinds.into_iter().collect()}).collect(),codes:codes.into_iter().collect()})
 }
 #[cfg(test)]
 mod tests {
