@@ -169,6 +169,10 @@ function Invoke-WindowsInventory {
     if($env:SAFEPATCH_PROGRESS_FILE){[IO.File]::WriteAllText($env:SAFEPATCH_PROGRESS_FILE,'REGISTRY_DONE')}
     $winget=if(Test-Cancelled){[pscustomobject]@{records=@();coverage=@([pscustomobject]@{scanner='winget';status='UNKNOWN';count=0;codes=@('CANCELLED')})}}else{Get-WinGetInventory}
     if($env:SAFEPATCH_PROGRESS_FILE){[IO.File]::WriteAllText($env:SAFEPATCH_PROGRESS_FILE,'WINGET_DONE')}
-    [pscustomobject]@{records=@($registry.records)+@($winget.records);coverage=@($registry.coverage)+@($winget.coverage)} | ConvertTo-Json -Depth 8 -Compress
+    try{$vscode=Get-VSCodeInventory}catch{$vscode=[pscustomobject]@{records=@();coverage=@(
+        [pscustomobject]@{scanner='vscode';status='UNKNOWN';count=0;codes=@('VSCODE_COLLECTOR_UNAVAILABLE')},
+        [pscustomobject]@{scanner='vscode-extension';status='UNKNOWN';count=0;codes=@('VSCODE_COLLECTOR_UNAVAILABLE')})}}
+    if($env:SAFEPATCH_PROGRESS_FILE){[IO.File]::WriteAllText($env:SAFEPATCH_PROGRESS_FILE,'VSCODE_DONE')}
+    [pscustomobject]@{records=@($registry.records)+@($winget.records)+@($vscode.records);coverage=@($registry.coverage)+@($winget.coverage)+@($vscode.coverage)} | ConvertTo-Json -Depth 8 -Compress
 }
 if($MyInvocation.InvocationName -ne '.') { Invoke-WindowsInventory }

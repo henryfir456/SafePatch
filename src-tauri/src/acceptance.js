@@ -2,7 +2,7 @@
 // No fixtures, device data uploads, external scripts, or discovered binaries.
 (async()=>{
   const invoke=window.__TAURI_INTERNALS__.invoke;
-  const wait=async predicate=>{const deadline=Date.now()+120000;while(Date.now()<deadline){if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw Error('ACCEPTANCE_TIMEOUT');};
+  const wait=async predicate=>{const deadline=Date.now()+140000;while(Date.now()<deadline){if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw Error('ACCEPTANCE_TIMEOUT');};
   const buttons=()=>[...document.querySelectorAll('button')];
   const start=()=>buttons().find(b=>b.textContent==='開始唯讀掃描');
   try{
@@ -29,6 +29,7 @@
     const renderedVersions=rows.filter(r=>r.cells[1].textContent!=='UNKNOWN').length;
     if(versioned!==renderedVersions)throw Error('ACCEPTANCE_VERSION_RENDER_FAILED');
     if(rows.some((r,i)=>r.cells[0].querySelector('b').textContent!==assets[i].display_name||r.cells[1].textContent!==(assets[i].installed_version??'UNKNOWN')||r.cells[2].textContent!==(assets[i].publisher??'UNKNOWN')))throw Error('ACCEPTANCE_EXACT_METADATA_FAILED');
+    if(rows.some((r,i)=>assets[i].provenance.some(p=>p.profile_ref&&!r.cells[3].textContent.includes('profile: '+p.profile_ref))))throw Error('ACCEPTANCE_PROFILE_RENDER_FAILED');
     if(!document.body.textContent.includes('UNKNOWN ≠ 安全'))throw Error('ACCEPTANCE_UNKNOWN_LABEL_FAILED');
     if(s.coverage.some(c=>c.status!=='COMPLETE')&&!document.body.textContent.includes('PARTIAL'))throw Error('ACCEPTANCE_COVERAGE_RENDER_FAILED');
     await invoke('acceptance_report',{report:{mode,scan_id:s.id,asset_count:assets.length,rendered_rows:rows.length,versioned_count:versioned,rendered_versions:renderedVersions,cancellation,passed:true,error_code:null}});
