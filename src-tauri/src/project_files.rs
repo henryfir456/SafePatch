@@ -111,13 +111,19 @@ mod local {
         }
         #[test]fn junction_root_and_junction_ancestor_cannot_read_outside_metadata(){
             #[link(name="kernel32")]
-            extern "system" {fn GetWindowsDirectoryW(buffer:*mut u16,size:u32)->u32;}
-            let mut buffer=[0u16;32768];let count=unsafe{GetWindowsDirectoryW(buffer.as_mut_ptr(),buffer.len() as u32)} as usize;
-            assert!(count>0&&count<buffer.len());let cmd=PathBuf::from(String::from_utf16(&buffer[..count]).unwrap()).join("System32/cmd.exe");
+            extern "system" {fn DeviceIoControl(handle:*mut std::ffi::c_void,code:u32,input:*const std::ffi::c_void,input_size:u32,output:*mut std::ffi::c_void,output_size:u32,returned:*mut u32,overlapped:*mut std::ffi::c_void)->i32;}
+            use std::os::windows::ffi::OsStrExt;
             let temporary=tempfile::tempdir().unwrap();let target=temporary.path().join("outside");let leaf=target.join("project");fs::create_dir_all(&leaf).unwrap();
             fs::write(leaf.join("package-lock.json"),br#"{"lockfileVersion":3,"packages":{}}"#).unwrap();
-            let junction=temporary.path().join("selected");
-            let status=std::process::Command::new(cmd).args(["/d","/c","mklink","/J"]).arg(&junction).arg(&target).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().unwrap();assert!(status.success());
+            // Owned fixture, native mount-point reparse data. No shell or elevation.
+            let junction=temporary.path().join("selected");fs::create_dir(&junction).unwrap();
+            let substitute:Vec<u16>=format!(r"\??\{}",target.display()).encode_utf16().collect();let print:Vec<u16>=target.as_os_str().encode_wide().collect();
+            let mut data=Vec::new();data.extend_from_slice(&0xa0000003u32.to_le_bytes());
+            let payload_length=8+2*(substitute.len()+1+print.len()+1);data.extend_from_slice(&(payload_length as u16).to_le_bytes());data.extend_from_slice(&0u16.to_le_bytes());
+            for value in [0,substitute.len()*2,(substitute.len()+1)*2,print.len()*2]{data.extend_from_slice(&(value as u16).to_le_bytes());}
+            for value in substitute.iter().chain([0].iter()).chain(print.iter()).chain([0].iter()){data.extend_from_slice(&value.to_le_bytes());}
+            let handle=OpenOptions::new().write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT).open(&junction).unwrap();let mut returned=0;
+            assert_ne!(unsafe{DeviceIoControl(handle.as_raw_handle() as _,0x900a4,data.as_ptr() as _,data.len() as u32,std::ptr::null_mut(),0,&mut returned,std::ptr::null_mut())},0,"owned junction fixture failed: {:?}",std::io::Error::last_os_error().raw_os_error());drop(handle);
             assert_eq!(Root::open(&junction).err(),Some("NPM_METADATA_UNSAFE"));
             assert_eq!(read(&junction.join("project"),&AtomicBool::new(false)).err(),Some("NPM_METADATA_UNSAFE"));
             fs::remove_dir(&junction).unwrap();assert!(leaf.join("package-lock.json").is_file());
