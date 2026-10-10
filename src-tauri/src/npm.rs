@@ -177,7 +177,7 @@ pub fn parse_lock(bytes:&[u8],environment_id:&str,manifest:Option<&[u8]>,cancel:
     for (index,entry) in descriptors.iter().enumerate(){
         check_cancel(cancel)?;
         let fields=if version==1{vec![("requires","DEPENDENCY")]}else{direct_fields.to_vec()};
-        for (name,kind) in dependency_names(&entry.descriptor,&fields,&mut codes){
+        for (name,kind) in dependency_names(entry.descriptor,&fields,&mut codes){
             if let Some(target)=resolve_slot(&entry.slot,name,&slots){
                 if edges.len()>=MAX_EDGES{return Err("NPM_EDGE_LIMIT")}
                 edges.entry((packages[index].id.clone(),packages[target].id.clone())).or_default().insert(kind);

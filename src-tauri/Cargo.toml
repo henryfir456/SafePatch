@@ -36,3 +36,7 @@ required-features = ["desktop"]
 [[bin]]
 name = "inventory_probe"
 path = "src/bin/inventory_probe.rs"
+
+[[bin]]
+name = "npm_probe"
+path = "src/bin/npm_probe.rs"

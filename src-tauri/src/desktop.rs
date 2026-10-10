@@ -11,6 +11,12 @@ fn scan_status(service:State<'_,Arc<ScanService>>,scan_id:String)->Result<Scan,S
 fn latest_scan(service:State<'_,Arc<ScanService>>)->Result<Option<Scan>,String>{service.latest()}
 #[tauri::command]
 fn list_assets(service:State<'_,Arc<ScanService>>,scan_id:String)->Result<Vec<Asset>,String>{service.assets(&scan_id)}
+#[tauri::command]
+fn start_npm_scan(service:State<'_,Arc<ScanService>>,project_root:String)->Result<Scan,String>{service.start_project(project_root)}
+#[tauri::command]
+fn latest_npm_scan(service:State<'_,Arc<ScanService>>)->Result<Option<Scan>,String>{service.latest_project()}
+#[tauri::command]
+fn npm_graph(service:State<'_,Arc<ScanService>>,scan_id:String)->Result<Option<crate::npm::DependencyGraph>,String>{service.project_graph(&scan_id)}
 pub fn run(){
     tauri::Builder::default().setup(|app|{
         #[cfg(feature="acceptance")]
@@ -24,9 +30,9 @@ pub fn run(){
         if _payload.event()==tauri::webview::PageLoadEvent::Finished && _window.try_state::<crate::acceptance::Acceptance>().is_some(){let _=_window.eval(include_str!("acceptance.js"));}
     }).invoke_handler({
         #[cfg(feature="acceptance")]
-        {tauri::generate_handler![start_scan,cancel_scan,scan_status,latest_scan,list_assets,crate::acceptance::acceptance_mode,crate::acceptance::acceptance_report]}
+        {tauri::generate_handler![start_scan,cancel_scan,scan_status,latest_scan,list_assets,start_npm_scan,latest_npm_scan,npm_graph,crate::acceptance::acceptance_mode,crate::acceptance::acceptance_report]}
         #[cfg(not(feature="acceptance"))]
-        {tauri::generate_handler![start_scan,cancel_scan,scan_status,latest_scan,list_assets]}
+        {tauri::generate_handler![start_scan,cancel_scan,scan_status,latest_scan,list_assets,start_npm_scan,latest_npm_scan,npm_graph]}
     })
         .run(tauri::generate_context!()).expect("SafePatch could not start; check local data directory permissions");
 }
