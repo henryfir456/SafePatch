@@ -1,6 +1,7 @@
 pub mod db;
 pub mod model;
 pub mod windows;
+pub mod npm;
 mod instance;
 #[cfg(feature="desktop")]
 pub mod desktop;
