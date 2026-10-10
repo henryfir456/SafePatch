@@ -30,7 +30,7 @@ try {
  # A command-line ALLUSERS override must be refused by the compiled MSI.
  $p=Start-Process -FilePath $msiexec -ArgumentList ('/i "'+$msi.FullName+'" /qn /norestart ALLUSERS=1') -PassThru
  if(-not $p.WaitForExit(120000)){$p.Kill();throw 'PREVIEW_OVERRIDE_TIMEOUT'}
- if($p.ExitCode -eq 0){throw 'PREVIEW_ALLUSERS_OVERRIDE_ACCEPTED'};$report.allusers_override='REFUSED'
+ if($p.ExitCode -ne 1603){throw 'PREVIEW_ALLUSERS_OVERRIDE_INDETERMINATE'};$report.allusers_override='REFUSED'
  $null=New-Item -ItemType Directory -Path $dataRoot
  $sentinel=Join-Path $dataRoot 'owned-ci-retention-sentinel';[IO.File]::WriteAllText($sentinel,[Guid]::NewGuid().ToString());$sentinelHash=(Get-FileHash -LiteralPath $sentinel).Hash
  $runtime=$false
@@ -60,6 +60,7 @@ try {
   $report.npm_scan='PASS';$report.packages=$n.packages;$report.edges=$n.edges;$npmId=$n.npm.id
   Close-Own $exeApp;$exeApp=$null
   $msiApp=Start-Process -FilePath (Join-Path $msiDir 'safepatch.exe') -PassThru;$root=App-Root $msiApp
+  $end=[DateTime]::UtcNow.AddSeconds(25);while(-not(Control $root 'npm: PARTIAL')){if([DateTime]::UtcNow -gt $end){throw 'PREVIEW_UIA_RESTORED_RESULT_UNAVAILABLE'};Start-Sleep -Milliseconds 100}
   $reopened=Read-Stats
   if($reopened.npm.id -ne $npmId -or $reopened.windows.status -ne 'CANCELLED' -or $reopened.packages -ne $n.packages){throw 'PREVIEW_RESTART_MISMATCH'}
   $report.restart='PASS';$report.status='PASS';$report.code=$null
@@ -72,7 +73,8 @@ finally {
  try {
   if($exeInstalled){$p=Start-Process -FilePath (Join-Path $exeDir 'uninstall.exe') -ArgumentList ('/S _?='+$exeDir) -PassThru;Wait-OwnProcess $p}
   if($msiInstalled){
-   if(Test-Path -LiteralPath (Join-Path $msiDir 'safepatch.exe')){if((Get-FileHash -LiteralPath (Join-Path $msiDir 'safepatch.exe')).Hash.ToLowerInvariant() -ne $manifest.production_sha256){throw 'PREVIEW_CROSS_FORMAT_REMOVAL'}}
+   if(-not(Test-Path -LiteralPath (Join-Path $msiDir 'safepatch.exe'))){throw 'PREVIEW_CROSS_FORMAT_REMOVAL'}
+   if((Get-FileHash -LiteralPath (Join-Path $msiDir 'safepatch.exe')).Hash.ToLowerInvariant() -ne $manifest.production_sha256){throw 'PREVIEW_CROSS_FORMAT_REMOVAL'}
    $p=Start-Process -FilePath $msiexec -ArgumentList ('/x "'+$msi.FullName+'" /qn /norestart') -PassThru;Wait-OwnProcess $p
   }
   if($sentinel -and (Test-Path -LiteralPath $sentinel) -and (Get-FileHash -LiteralPath $sentinel).Hash -eq $sentinelHash){$report.uninstall_retention='PASS'}elseif($sentinel){throw 'PREVIEW_DATA_REMOVED'}
