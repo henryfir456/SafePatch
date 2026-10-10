@@ -147,6 +147,11 @@ pub fn read_python_environment(root:&Path,cancel:&AtomicBool)->Result<PythonSnap
             _=>invalid.packages[0].id="a".repeat(64),
         }assert!(validate_snapshot(&invalid).is_err(),"case {field}");}
     }
+    #[test]fn runtime_observations_and_venv_hints_require_python_release_shape(){
+        for version in ["1","3!1.2.3","3.13.2+private"]{let mut s=fixture_snapshot();s.venv_metadata=Some(VenvMetadata{declared_version:Some(version.into()),include_system_packages:Some(false),codes:vec![]});assert!(validate_snapshot(&s).is_err(),"venv {version}");
+            s.venv_metadata=None;let path_hash=crate::model::hash("owned-interpreter");s.interpreters.push(PythonInterpreter{id:crate::model::hash(&format!("python-interpreter:{path_hash}")),path_hash,version:Some(version.into()),file_version:None,product_name:None,publisher:None,source:"PE_VERSION_RESOURCE_METADATA".into(),codes:vec![]});assert!(validate_snapshot(&s).is_err(),"runtime {version}");}
+        let mut s=fixture_snapshot();s.venv_metadata=Some(VenvMetadata{declared_version:Some("3.15.0rc1".into()),include_system_packages:Some(false),codes:vec![]});assert!(validate_snapshot(&s).is_ok());
+    }
 }
 #[cfg(all(test,windows))]
 mod tests {
