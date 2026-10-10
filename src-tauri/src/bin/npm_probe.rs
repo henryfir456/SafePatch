@@ -18,7 +18,12 @@ fn run()->Result<(),String>{
     let mut expected=expected;expected.observed_at=graph.observed_at.clone();
     let snapshot=serde_json::to_string(&graph).map_err(|_|"PROBE_SERIALIZATION")?;
     if serde_json::to_string(&expected).map_err(|_|"PROBE_SERIALIZATION")?!=snapshot{return Err("PROBE_GRAPH_MISMATCH".into())}
-    drop(service);let reopened=ScanService::new(path)?;
+    drop(service);let reopening=Instant::now();
+    let reopened=loop{match ScanService::new(path.clone()){
+        Ok(service)=>break service,
+        Err(code) if code=="DATABASE_IN_USE"&&reopening.elapsed()<Duration::from_secs(2)=>std::thread::sleep(Duration::from_millis(25)),
+        Err(code)=>return Err(code)
+    }};
     if serde_json::to_string(&reopened.project_graph(&scan.id)?.ok_or("PROBE_REOPEN_MISSING")?).map_err(|_|"PROBE_SERIALIZATION")?!=snapshot{return Err("PROBE_REOPEN_MISMATCH".into())}
     if metadata_hashes(&root)!=before{return Err("PROBE_PROJECT_CHANGED".into())}
     println!("{}",serde_json::json!({"passed":true,"packages":graph.packages.len(),"edges":graph.edges.len(),"versions":graph.packages.iter().filter(|p|p.version.is_some()).count(),"direct":graph.packages.iter().filter(|p|p.direct_status=="DIRECT").count(),"transitive":graph.packages.iter().filter(|p|p.direct_status=="TRANSITIVE").count(),"unknown_relation":graph.packages.iter().filter(|p|p.direct_status=="UNKNOWN").count(),"lockfile_kind":graph.lockfile_kind,"lockfile_version":graph.lockfile_version,"cancellation":true,"readonly_unchanged":true,"reopen_exact":true,"duration_ms":started.elapsed().as_millis()}));Ok(())
