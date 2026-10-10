@@ -133,7 +133,10 @@ mod tests {
         let table=block("040904b0",&[],0,1,&children);let info=block("StringFileInfo",&[],0,1,&[table]);block("VS_VERSION_INFO",&[],0,0,&[info])
     }
     fn fixture(is64:bool,values:&[(&str,&str)])->Vec<u8>{
-        let payload=strings(values);let mut resource=vec![0u8;88];
+        fixture_payload(is64,strings(values))
+    }
+    fn fixture_payload(is64:bool,payload:Vec<u8>)->Vec<u8>{
+        let mut resource=vec![0u8;88];
         for (offset,value) in [(14,1u16),(38,1),(62,1)]{resource[offset..offset+2].copy_from_slice(&value.to_le_bytes())}
         for (offset,value) in [(16,16u32),(20,0x80000018),(40,1),(44,0x80000030),(64,1033),(68,72),(72,0x1058),(76,payload.len() as u32)]{resource[offset..offset+4].copy_from_slice(&value.to_le_bytes())}
         resource.extend(payload);let optional_size=if is64{240}else{224};let mut pe=vec![0u8;512+resource.len()];
@@ -158,8 +161,9 @@ mod tests {
     }
     #[test]fn retained_utf16_values_require_a_nul_terminator(){
         for key in ["ProductVersion","FileVersion"]{
-            let mut input=fixture(false,&[(key,"3.13.2")]);let needle:Vec<_>="3.13.2".encode_utf16().flat_map(u16::to_le_bytes).collect();let start=input.windows(needle.len()).position(|v|v==needle).unwrap();
-            let block_start=start-((6+(key.len()+1)*2+3)&!3);input[block_start+2..block_start+4].copy_from_slice(&6u16.to_le_bytes());
+            // Exact block bounds: rejection must not depend on leftover padding.
+            let raw:Vec<_>="3.13.2".encode_utf16().flat_map(u16::to_le_bytes).collect();let value=block(key,&raw,6,1,&[]);
+            let table=block("040904b0",&[],0,1,&[value]);let info=block("StringFileInfo",&[],0,1,&[table]);let input=fixture_payload(false,block("VS_VERSION_INFO",&[],0,0,&[info]));
             assert!(parse_pe_metadata(&input).is_err(),"unterminated {key}");
         }
         assert!(parse_pe_metadata(&fixture(false,&[("ProductVersion","")])).unwrap().product_version.is_none());
