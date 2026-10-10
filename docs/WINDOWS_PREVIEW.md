@@ -34,7 +34,7 @@ Alternatively, open the MSI or use Windows Installer:
 msiexec /i .\SafePatch-Preview-0.1.0-x64.msi /passive /norestart
 ```
 
-MSI is strictly per-user and rejects ALLUSERS overrides; its Start-menu folder is **SafePatch Preview MSI**. EXE and MSI own distinct default install directories under your LocalAppData Programs directory. Choose one format for normal use. Both use the same per-user history location, and only one running application can own that database. Close SafePatch before reinstalling. Installation success is distinct from scanner coverage.
+MSI is strictly per-user and rejects ALLUSERS overrides; its Start-menu folder is **SafePatch Preview MSI**. EXE defaults to `%LOCALAPPDATA%\Programs\SafePatchPreview-EXE`; MSI defaults to `%LOCALAPPDATA%\SafePatchPreview-MSI`. Their install directories and shortcuts are distinct. Choose one format for normal use. Both use the same per-user history location, and only one running application can own that database. Close SafePatch before reinstalling. Installation success is distinct from scanner coverage.
 
 ## Operate
 
@@ -54,8 +54,8 @@ Windows Settings → Apps lists **SafePatch Preview (EXE)** or **SafePatch Previ
 
 Prior main scanner evidence on the connected Windows 11 Home build 26200, non-admin, is recorded in [M1](M1_VERIFICATION.md), [VS Code](M2_VSCODE_VERIFICATION.md), [Node](M2_NODE_VERIFICATION.md) and [npm](M2_NPM_VERIFICATION.md). It is background scanner evidence, not installation acceptance for this final payload.
 
-The new pipeline runs on a clean GitHub Windows Server runner. Package checks inspect compiled MSI privilege/registry/action tables and extract real EXE/MSI payloads to compare their SHA-256 with the production binary. Acceptance-feature binaries build in a separate Cargo target directory and are excluded from the downloadable Preview artifact.
+The new pipeline runs on a clean GitHub Windows Server runner. Package checks inspect compiled MSI privilege/registry/action tables and extract real EXE/MSI payloads to compare their SHA-256 with the production binary. Tauri bundle-type binary patching is disabled (Preview has no updater), so both formats preserve that exact production payload. Acceptance-feature binaries build in a separate Cargo target directory and are excluded from the downloadable Preview artifact.
 
-The CI lifecycle attempts installation, payload comparison, launch/UI scan/cancel/npm/restart and own test uninstall/retention in a restricted same-user child token, and records the actual result in ci-lifecycle.json. PASS means that reported gate executed on the hosted Server runner; it is not an independent standard-account login or Windows 10/11 user-device claim. Missing runtime/token/UIA execution remains NOT_VERIFIED and an observed functional failure fails CI.
+The CI lifecycle attempts installation, payload comparison, launch/UI scan/cancel/npm/restart and own test uninstall/retention (including an unchanged SQLite-file hash after both apps close) in a restricted same-user child token, and records the actual result in ci-lifecycle.json. PASS means that reported gate executed on the hosted Server runner; it is not an independent standard-account login or Windows 10/11 user-device claim. Missing runtime/token/UIA execution remains NOT_VERIFIED and an observed functional failure fails CI.
 
 **Connected user Windows 10/11 final-installer non-admin install, launch, scan, cancellation, reopen and manual visible UI: NOT VERIFIED while that environment is unavailable.** No user data or other projects are modified. A green regression/build or an earlier functional scanner artifact cannot replace these gates.
