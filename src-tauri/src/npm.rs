@@ -287,6 +287,18 @@ mod tests {
         graph.edges[0].to_id="f".repeat(64);assert_eq!(validate_graph(&graph),Err("NPM_GRAPH_INVALID"));
         let mut graph=parse(modern(3));graph.packages[0].source="https://secret.invalid/private".into();assert_eq!(validate_graph(&graph),Err("NPM_GRAPH_INVALID"));
     }
+    #[test]fn nested_unused_payload_is_borrowed_once_instead_of_depth_times(){
+        let mut descriptor=json!({"version":"1.0.0","unused":"x".repeat(1024*1024)});
+        for _ in 0..40{descriptor=json!({"version":"1.0.0","dependencies":{"a":descriptor}});}
+        let lock=json!({"lockfileVersion":1,"dependencies":{"a":descriptor}});
+        let map=lock["dependencies"].as_object().unwrap();let mut entries=Vec::new();let mut codes=BTreeSet::new();
+        legacy_entries(map,"",0,&mut entries,&mut codes,&AtomicBool::new(false)).unwrap();
+        let first=map["a"].as_object().unwrap();assert!(std::ptr::eq(entries[0].descriptor,first));
+        let mut deepest=first;for _ in 0..40{deepest=deepest["dependencies"]["a"].as_object().unwrap();}
+        assert!(std::ptr::eq(entries.last().unwrap().descriptor,deepest));
+        let bytes=serde_json::to_vec(&lock).unwrap();assert!(bytes.len()<MAX_LOCK_BYTES);
+        assert_eq!(parse_lock(&bytes,&"e".repeat(64),None,&AtomicBool::new(false)).unwrap().packages.len(),41);
+    }
     #[cfg(windows)]
     fn project_fixture(directory:&std::path::Path,name:&str){
         std::fs::create_dir_all(directory).unwrap();

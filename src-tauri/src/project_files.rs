@@ -33,6 +33,16 @@ mod local {
         let path=PathBuf::from(text);lexical_root(&path)?;Ok(path)
     }
     fn lexical_key(path:&Path)->String{path.to_string_lossy().replace('/',"\\").trim_end_matches('\\').to_ascii_lowercase()}
+    fn selected_key(path:&Path)->Result<String,&'static str>{
+        // Expand Windows 8.3 spelling only; this is not link canonicalization.
+        // The directory and its parents are already held without DELETE sharing.
+        use std::os::windows::ffi::OsStrExt;
+        let wide:Vec<_>=path.as_os_str().encode_wide().chain(Some(0)).collect();let mut buffer=vec![0u16;32768];
+        let count=unsafe{GetLongPathNameW(wide.as_ptr(),buffer.as_mut_ptr(),buffer.len() as u32)} as usize;
+        if count==0||count>=buffer.len(){return Err("NPM_METADATA_UNSAFE")}
+        let expanded=PathBuf::from(String::from_utf16(&buffer[..count]).map_err(|_|"NPM_METADATA_UNSAFE")?);
+        Ok(lexical_key(&expanded))
+    }
     struct Root {path:PathBuf,handle:File,_ancestors:Vec<File>}
     impl Root {
         fn open(path:&Path)->Result<Self,&'static str>{
@@ -45,7 +55,7 @@ mod local {
                 let handle=OpenOptions::new().read(true).share_mode(FILE_SHARE_READ|FILE_SHARE_WRITE)
                     .custom_flags(FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT).open(ancestor).map_err(|_|"NPM_ROOT_UNREADABLE")?;
                 let metadata=handle.metadata().map_err(|_|"NPM_ROOT_UNREADABLE")?;
-                if !metadata.is_dir()||metadata.file_attributes()&FILE_ATTRIBUTE_REPARSE_POINT!=0||lexical_key(&final_path(&handle)?)!=lexical_key(ancestor){return Err("NPM_METADATA_UNSAFE")}
+                if !metadata.is_dir()||metadata.file_attributes()&FILE_ATTRIBUTE_REPARSE_POINT!=0||lexical_key(&final_path(&handle)?)!=selected_key(ancestor)?{return Err("NPM_METADATA_UNSAFE")}
                 handles.push(handle);
             }
             let handle=handles.pop().ok_or("NPM_ROOT_INVALID")?;
@@ -88,6 +98,17 @@ mod local {
         if root.marker_exists("pnpm-lock.yaml"){graph.codes.push("PNPM_FORMAT_NOT_SCANNED".into())}
         if root.marker_exists("yarn.lock"){graph.codes.push("YARN_FORMAT_NOT_SCANNED".into())}
         graph.codes.sort();graph.codes.dedup();cancelled(cancel)?;Ok(graph)
+    }
+    #[cfg(test)]mod tests{
+        use super::*;
+        #[test]fn verified_ancestor_handles_prevent_boundary_replacement(){
+            let temporary=tempfile::tempdir().unwrap();let parent=temporary.path().join("parent");let selected=parent.join("project");fs::create_dir_all(&selected).unwrap();
+            let root=Root::open(&selected).unwrap();
+            assert!(fs::rename(&parent,temporary.path().join("outside")).is_err());
+            assert!(fs::rename(&selected,parent.join("outside-project")).is_err());
+            assert!(root.unchanged().is_ok());drop(root);
+            fs::rename(&parent,temporary.path().join("outside")).unwrap();
+        }
     }
 }
 #[cfg(windows)]
