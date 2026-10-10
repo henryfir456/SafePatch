@@ -1,4 +1,110 @@
 //! Pure, bounded metadata contracts. No interpreter or installed code runs.
+use serde::{Deserialize,Serialize};
+pub const MAX_METADATA_BYTES:usize=1024*1024;
+#[derive(Clone,Debug,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DistributionMetadata {
+    pub display_name:String,pub name:String,pub version:Option<String>,pub installer:String,pub codes:Vec<String>,
+}
+#[derive(Clone,Debug,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VenvMetadata {
+    pub declared_version:Option<String>,pub include_system_packages:Option<bool>,pub codes:Vec<String>,
+}
+fn digits(value:&str)->&str{&value[value.bytes().take_while(u8::is_ascii_digit).count()..]}
+fn separator(value:&str)->&str{if value.as_bytes().first().is_some_and(|c|matches!(c,b'.'|b'_'|b'-')){&value[1..]}else{value}}
+fn suffix<'a>(value:&'a str,tags:&[&str])->Option<&'a str>{
+    let candidate=separator(value);
+    tags.iter().find_map(|tag|candidate.strip_prefix(tag).map(|rest|digits(separator(rest))))
+}
+/// PEP 440 syntax only. Preserves the exact declaration, without range matching.
+pub fn exact_version(value:&str)->bool {
+    if value.is_empty()||value.len()>128||!value.is_ascii()||value.bytes().any(|c|c.is_ascii_whitespace()||c.is_ascii_control()){return false}
+    let lowered=value.to_ascii_lowercase();let mut public=lowered.strip_prefix('v').unwrap_or(&lowered);
+    if let Some((base,local))=public.split_once('+'){
+        if local.is_empty()||!local.split(['.','_','-']).all(|part|!part.is_empty()&&part.bytes().all(|c|c.is_ascii_alphanumeric())){return false}
+        public=base;
+    }
+    if let Some((epoch,base))=public.split_once('!'){
+        if epoch.is_empty()||!epoch.bytes().all(|c|c.is_ascii_digit()){return false}
+        public=base;
+    }
+    let mut rest=digits(public);if rest.len()==public.len(){return false}
+    while let Some(next)=rest.strip_prefix('.'){
+        if !next.as_bytes().first().is_some_and(u8::is_ascii_digit){break}
+        rest=digits(next);
+    }
+    if let Some(next)=suffix(rest,&["preview","alpha","beta","pre","rc","a","b","c"]){rest=next;}
+    if let Some(next)=rest.strip_prefix('-').filter(|s|s.as_bytes().first().is_some_and(u8::is_ascii_digit)){rest=digits(next);}
+    else if let Some(next)=suffix(rest,&["post","rev","r"]){rest=next;}
+    if let Some(next)=suffix(rest,&["dev"]){rest=next;}
+    rest.is_empty()
+}
+fn valid_name(name:&str)->bool{
+    !name.is_empty()&&name.len()<=214&&name.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)&&name.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)&&name.bytes().all(|c|c.is_ascii_alphanumeric()||matches!(c,b'.'|b'_'|b'-'))
+}
+fn normalized_name(name:&str)->String{
+    let mut result=String::new();let mut previous_separator=false;
+    for c in name.bytes(){if matches!(c,b'.'|b'_'|b'-'){if !previous_separator{result.push('-')}previous_separator=true;}else{result.push(c.to_ascii_lowercase() as char);previous_separator=false;}}
+    result
+}
+fn installer_kind(value:Option<&[u8]>)->String{
+    match value.filter(|v|v.len()<=128).and_then(|v|std::str::from_utf8(v).ok()).map(str::trim){
+        Some("pip")=>"PIP_INSTALLER_METADATA",Some("uv")=>"UV_INSTALLER_METADATA",Some("conda")=>"CONDA_INSTALLER_METADATA",_=>"UNKNOWN",
+    }.into()
+}
+pub fn parse_distribution(bytes:&[u8],installer:Option<&[u8]>)->Result<DistributionMetadata,&'static str>{
+    if bytes.len()>MAX_METADATA_BYTES{return Err("PYTHON_METADATA_SIZE_LIMIT")}
+    let text=std::str::from_utf8(bytes).map_err(|_|"PYTHON_METADATA_INVALID")?;
+    if text.contains('\0'){return Err("PYTHON_METADATA_INVALID")}
+    let mut name=None;let mut version=None;let mut format=None;let mut previous=String::new();
+    for (index,line) in text.lines().enumerate(){
+        if line.is_empty(){break}
+        if index>=256||line.len()>8192{return Err("PYTHON_METADATA_SIZE_LIMIT")}
+        if line.starts_with([' ','\t']){
+            if matches!(previous.as_str(),"name"|"version"|"metadata-version"){return Err("PYTHON_METADATA_INVALID")}
+            continue;
+        }
+        let (key,value)=line.split_once(':').ok_or("PYTHON_METADATA_INVALID")?;
+        if !key.bytes().all(|c|c.is_ascii_alphanumeric()||c==b'-'){return Err("PYTHON_METADATA_INVALID")}
+        previous=key.to_ascii_lowercase();let value=value.trim();
+        if value.chars().any(char::is_control){return Err("PYTHON_METADATA_INVALID")}
+        let target=match previous.as_str(){"name"=>&mut name,"version"=>&mut version,"metadata-version"=>&mut format,_=>continue};
+        if target.is_some(){return Err("PYTHON_METADATA_DUPLICATE")}
+        if value.len()>256{return Err("PYTHON_METADATA_SIZE_LIMIT")}
+        *target=Some(value.to_owned());
+    }
+    if !matches!(format.as_deref(),Some("1.0"|"1.1"|"1.2"|"2.0"|"2.1"|"2.2"|"2.3"|"2.4"|"2.5")){return Err("PYTHON_METADATA_FORMAT_UNSUPPORTED")}
+    let display_name=name.ok_or("PYTHON_PACKAGE_NAME_INVALID")?;if !valid_name(&display_name){return Err("PYTHON_PACKAGE_NAME_INVALID")}
+    let version=version.filter(|v|exact_version(v));let mut codes=vec!["INSTALLED_METADATA_NOT_CONTENT_PROOF".into()];
+    if version.is_none(){codes.push("PYTHON_VERSION_UNKNOWN".into())}
+    Ok(DistributionMetadata{name:normalized_name(&display_name),display_name,version,installer:installer_kind(installer),codes})
+}
+pub fn parse_venv_config(bytes:&[u8])->Result<VenvMetadata,&'static str>{
+    if bytes.len()>65536{return Err("PYTHON_VENV_CONFIG_SIZE_LIMIT")}
+    let text=std::str::from_utf8(bytes).map_err(|_|"PYTHON_VENV_CONFIG_INVALID")?;if text.contains('\0'){return Err("PYTHON_VENV_CONFIG_INVALID")}
+    let mut version=None;let mut system=None;let mut seen_version=false;let mut seen_system=false;let mut partial=false;
+    for (index,line) in text.lines().enumerate(){
+        if index>=512||line.len()>4096{return Err("PYTHON_VENV_CONFIG_SIZE_LIMIT")}
+        let line=line.trim();if line.is_empty()||line.starts_with('#'){continue}
+        let Some((key,value))=line.split_once('=') else{partial=true;continue};
+        let key=key.trim().to_ascii_lowercase();let value=value.trim();
+        match key.as_str(){
+            "version"=>{if seen_version{return Err("PYTHON_VENV_CONFIG_DUPLICATE")}seen_version=true;
+                let release=value.split(|c:char|!c.is_ascii_digit()&&c!='.').next().unwrap_or("").trim_end_matches('.');
+                if exact_version(value)&&release.split('.').count()==3&&!value.contains(['!','+']){version=Some(value.to_owned())}else{partial=true;}
+            },
+            "include-system-site-packages"=>{if seen_system{return Err("PYTHON_VENV_CONFIG_DUPLICATE")}seen_system=true;
+                system=match value.to_ascii_lowercase().as_str(){"true"=>Some(true),"false"=>Some(false),_=>{partial=true;None}};
+            },
+            _=>{},
+        }
+    }
+    partial|=!seen_version||!seen_system;
+    let mut codes=vec!["VENV_CONFIG_METADATA_NOT_RUNTIME_PROOF".into(),"BASE_AND_EXTRA_SITE_PACKAGES_NOT_SCANNED".into()];
+    if partial{codes.push("PYTHON_VENV_CONFIG_PARTIAL".into())}
+    Ok(VenvMetadata{declared_version:version,include_system_packages:system,codes})
+}
 #[cfg(test)]
 mod tests {
     use super::*;
