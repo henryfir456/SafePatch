@@ -13,4 +13,13 @@ Assert ($items[0].installation_source -eq 'UNKNOWN') 'catalog does not prove ins
 $failed=$false
 try { Convert-WinGetDocument ('{"bad":true}' | ConvertFrom-Json) } catch {$failed=$true}
 Assert $failed 'malformed JSON rejected'
-Write-Output 'Adapter regression assertions: PASS (8). Synthetic inputs; not device acceptance.'
+$official='{"Name":"winget","Arg":"https://cdn.winget.microsoft.com/cache","Type":"Microsoft.PreIndexed.Package","Identifier":"Microsoft.Winget.Source_8wekyb3d8bbwe","Data":"Microsoft.Winget.Source_8wekyb3d8bbwe"}' | ConvertFrom-Json
+Assert (Test-OfficialSourceDocument $official) 'official source accepted'
+$official.Arg='https://private.example.invalid/cache'
+Assert (-not (Test-OfficialSourceDocument $official)) 'private source alias rejected'
+$official.Arg='https://cdn.winget.microsoft.com/cache'; $official.Type='Microsoft.Rest'
+Assert (-not (Test-OfficialSourceDocument $official)) 'REST alias rejected'
+Assert (-not (Test-OfficialSourceDocument ([pscustomobject]@{Name='winget'}))) 'missing source metadata rejected'
+$official.Type='Microsoft.PreIndexed.Package'; $official.Arg=@('https://cdn.winget.microsoft.com/cache','https://private.example.invalid/cache')
+Assert (-not (Test-OfficialSourceDocument $official)) 'array source metadata rejected'
+Write-Output 'Adapter regression assertions: PASS (13). Synthetic inputs; not device acceptance.'

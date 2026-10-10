@@ -80,6 +80,41 @@ function Convert-WinGetDocument($Document) {
     }
     return @($records)
 }
+function Test-OfficialSourceDocument($Source) {
+    foreach($field in @('Name','Arg','Type','Identifier','Data')) {
+        if($null -eq $Source -or $null -eq $Source.PSObject.Properties[$field]) { return $false }
+        if($Source.$field -isnot [string]) { return $false }
+    }
+    return ($Source.Name -ceq 'winget' -and $Source.Arg -ceq 'https://cdn.winget.microsoft.com/cache' -and
+        $Source.Type -ceq 'Microsoft.PreIndexed.Package' -and $Source.Identifier -ceq 'Microsoft.Winget.Source_8wekyb3d8bbwe' -and
+        $Source.Data -ceq 'Microsoft.Winget.Source_8wekyb3d8bbwe')
+}
+function Confirm-OfficialWinGetSource([string]$Executable) {
+    # Source export reads local configuration only; never reset/add/update sources.
+    $sourceProcess=[Diagnostics.Process]::new()
+    $sourceStarted=$false
+    try {
+        $info=[Diagnostics.ProcessStartInfo]::new()
+        $info.FileName=$Executable; $info.Arguments='source export --name winget --disable-interactivity'
+        $info.UseShellExecute=$false; $info.CreateNoWindow=$true
+        $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
+        $sourceProcess.StartInfo=$info; [void]$sourceProcess.Start(); $sourceStarted=$true
+        $output=$sourceProcess.StandardOutput.ReadToEndAsync()
+        $discard=$sourceProcess.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        $timer=[Diagnostics.Stopwatch]::StartNew()
+        while(-not $sourceProcess.WaitForExit(100)) {
+            if(Test-Cancelled){$sourceProcess.Kill();$sourceProcess.WaitForExit();throw 'CANCELLED'}
+            if($timer.Elapsed.TotalSeconds -gt 15){$sourceProcess.Kill();$sourceProcess.WaitForExit();throw 'WINGET_SOURCE_TIMEOUT'}
+        }
+        [void]$discard.GetAwaiter().GetResult()
+        $json=$output.GetAwaiter().GetResult()
+        if($sourceProcess.ExitCode -ne 0 -or $json.Length -gt 1048576){throw 'WINGET_SOURCE_UNVERIFIED'}
+        if(-not (Test-OfficialSourceDocument ($json | ConvertFrom-Json))){throw 'WINGET_SOURCE_UNTRUSTED'}
+    } finally {
+        if($sourceStarted -and -not $sourceProcess.HasExited){$sourceProcess.Kill();$sourceProcess.WaitForExit()}
+        $sourceProcess.Dispose()
+    }
+}
 function Get-WinGetInventory {
     $process = $null; $temp = $null; $phase = 'DISCOVERY'
     try {
@@ -90,6 +125,8 @@ function Get-WinGetInventory {
         $phase = 'SIGNATURE'
         $signature = Get-AuthenticodeSignature -LiteralPath $exe
         if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '^CN=Microsoft Corporation,') { throw 'WINGET_UNTRUSTED' }
+        $phase = 'SOURCE'
+        Confirm-OfficialWinGetSource $exe
         # WinGet list has no stable JSON mode. Export provides catalog ID/version only.
         # No source agreements are accepted, no install/upgrade command is invoked.
         $temp = Join-Path ([IO.Path]::GetTempPath()) ('safepatch-'+[guid]::NewGuid().ToString('N')+'.json')

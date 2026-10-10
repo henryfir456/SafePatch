@@ -74,7 +74,7 @@ pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result
         if cancel.load(Ordering::Relaxed){let _=std::fs::write(&cancel_file,b"cancel");}
         if let Ok(phase)=std::fs::read_to_string(&progress_file){if phase!=previous_phase{match phase.as_str(){"REGISTRY_DONE"=>progress(45,"Registry complete / querying signed WinGet"),"WINGET_DONE"=>progress(80,"normalizing actual inventory"),_=>{}}previous_phase=phase;}}
         match child.try_wait(){Ok(Some(status))=>break status,Ok(None)=>{},Err(_)=>{let _=child.kill();let _=child.wait();return Err("ADAPTER_WAIT_FAILED".into())}}
-        // Adapter bounds registry at 30s and WinGet at 45s; allow cleanup overhead.
+        // Registry 30s, local source verification 15s, WinGet 45s; cleanup overhead.
         if started.elapsed()>Duration::from_secs(100){let _=child.kill();let _=child.wait();return Err("ADAPTER_TIMEOUT".into())}
         std::thread::sleep(Duration::from_millis(100));
     };
