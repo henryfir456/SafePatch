@@ -29,7 +29,7 @@ pub fn validate_graph(graph:&DependencyGraph)->Result<(),&'static str>{
     let mut ids=BTreeSet::new();
     for p in &graph.packages {
         if !hex(&p.id)||!hex(&p.slot_hash)||!ids.insert(p.id.as_str())||!valid_name(&p.name)||p.version.as_deref().is_some_and(|v|!exact_version(v))
-            ||!matches!(p.direct_status.as_str(),"DIRECT"|"TRANSITIVE"|"UNKNOWN")||!matches!(p.source.as_str(),"PUBLIC_REGISTRY_METADATA"|"GIT_METADATA"|"LOCAL_OR_LINK_METADATA"|"UNKNOWN"){return Err("NPM_GRAPH_INVALID")}
+            ||!matches!(p.direct_status.as_str(),"DIRECT"|"TRANSITIVE"|"UNKNOWN")||!matches!(p.source.as_str(),"NPM_REGISTRY_METADATA"|"GIT_METADATA"|"LOCAL_OR_LINK_METADATA"|"UNKNOWN"){return Err("NPM_GRAPH_INVALID")}
     }
     let mut pairs=BTreeSet::new();
     for e in &graph.edges {
@@ -38,7 +38,7 @@ pub fn validate_graph(graph:&DependencyGraph)->Result<(),&'static str>{
     }
     Ok(())
 }
-struct Declaration {slot:String,descriptor:Map<String,Value>}
+struct Declaration<'a> {slot:String,descriptor:&'a Map<String,Value>}
 fn check_cancel(cancel:&AtomicBool)->Result<(),&'static str>{if cancel.load(Ordering::Relaxed){Err("CANCELLED")}else{Ok(())}}
 fn valid_name(name:&str)->bool {
     if name.is_empty()||name.len()>214{return false}
@@ -66,11 +66,11 @@ fn exact_version(s:&str)->bool {
 fn source_kind(descriptor:&Map<String,Value>)->String {
     if descriptor.get("link").and_then(Value::as_bool)==Some(true){return "LOCAL_OR_LINK_METADATA".into()}
     let resolved=descriptor.get("resolved").and_then(Value::as_str).or_else(||descriptor.get("version").and_then(Value::as_str)).unwrap_or("");
-    if resolved.starts_with("https://registry.npmjs.org/"){"PUBLIC_REGISTRY_METADATA"}
+    if resolved.starts_with("https://registry.npmjs.org/"){"NPM_REGISTRY_METADATA"}
     else if resolved.starts_with("git+")||resolved.starts_with("git:"){"GIT_METADATA"}
     else if resolved.starts_with("file:"){"LOCAL_OR_LINK_METADATA"}else{"UNKNOWN"}.into()
 }
-fn legacy_entries(map:&Map<String,Value>,parent:&str,depth:usize,entries:&mut Vec<Declaration>,codes:&mut BTreeSet<String>,cancel:&AtomicBool)->Result<(),&'static str>{
+fn legacy_entries<'a>(map:&'a Map<String,Value>,parent:&str,depth:usize,entries:&mut Vec<Declaration<'a>>,codes:&mut BTreeSet<String>,cancel:&AtomicBool)->Result<(),&'static str>{
     if depth>64{return Err("NPM_DEPTH_LIMIT")}
     for (name,value) in map{
         check_cancel(cancel)?;
@@ -79,7 +79,7 @@ fn legacy_entries(map:&Map<String,Value>,parent:&str,depth:usize,entries:&mut Ve
         let slot=if parent.is_empty(){format!("node_modules/{name}")}else{format!("{parent}/node_modules/{name}")};
         if !valid_location(&slot){codes.insert("NPM_LOCATION_INVALID".into());continue}
         if entries.len()>=MAX_PACKAGES{return Err("NPM_PACKAGE_LIMIT")}
-        entries.push(Declaration{slot:slot.clone(),descriptor:descriptor.clone()});
+        entries.push(Declaration{slot:slot.clone(),descriptor});
         if let Some(nested)=descriptor.get("dependencies"){
             if let Some(nested)=nested.as_object(){legacy_entries(nested,&slot,depth+1,entries,codes,cancel)?}else{codes.insert("NPM_ENTRY_INVALID".into());}
         }
@@ -113,7 +113,7 @@ pub fn parse_lock(bytes:&[u8],environment_id:&str,manifest:Option<&[u8]>,cancel:
     let root=value.as_object().ok_or("NPM_INVALID_JSON")?;
     let version=root.get("lockfileVersion").and_then(Value::as_u64).filter(|v|matches!(v,1..=3)).ok_or("NPM_UNSUPPORTED_LOCKFILE")? as u8;
     let mut codes=BTreeSet::from(["LOCKFILE_DECLARATIONS_NOT_INSTALLED_PROOF".to_owned()]);
-    let mut entries=Vec::new();let mut metadata=BTreeMap::<String,Map<String,Value>>::new();
+    let mut entries=Vec::new();let mut metadata=BTreeMap::<String,&Map<String,Value>>::new();
     if version==1{
         let dependencies=root.get("dependencies").and_then(Value::as_object).ok_or("NPM_PACKAGES_INVALID")?;
         legacy_entries(dependencies,"",0,&mut entries,&mut codes,cancel)?;
@@ -123,15 +123,17 @@ pub fn parse_lock(bytes:&[u8],environment_id:&str,manifest:Option<&[u8]>,cancel:
         for (slot,descriptor) in packages{
             check_cancel(cancel)?;
             let Some(descriptor)=descriptor.as_object()else{codes.insert("NPM_ENTRY_INVALID".into());continue};
-            if slot.is_empty(){metadata.insert(slot.clone(),descriptor.clone());continue}
+            if slot.is_empty(){metadata.insert(slot.clone(),descriptor);continue}
             if !valid_location(slot){codes.insert("NPM_LOCATION_INVALID".into());continue}
-            metadata.insert(slot.clone(),descriptor.clone());entries.push(Declaration{slot:slot.clone(),descriptor:descriptor.clone()});
+            metadata.insert(slot.clone(),descriptor);entries.push(Declaration{slot:slot.clone(),descriptor});
         }
     }
     let mut packages=Vec::new();let mut slots=BTreeMap::new();let mut descriptors=Vec::new();let mut link_targets=BTreeMap::new();
     for entry in entries{
         check_cancel(cancel)?;
-        let mut version_descriptor=&entry.descriptor;
+        let mut version_descriptor=entry.descriptor;
+        let malformed_link=entry.descriptor.contains_key("link")&&!entry.descriptor.get("link").is_some_and(Value::is_boolean);
+        if malformed_link{codes.insert("NPM_LINK_METADATA_INVALID".into());}
         let is_link=entry.descriptor.get("link").and_then(Value::as_bool)==Some(true);
         let mut target_slot=None;
         if is_link{
@@ -139,26 +141,28 @@ pub fn parse_lock(bytes:&[u8],environment_id:&str,manifest:Option<&[u8]>,cancel:
             for _ in 0..16{
                 let Some(target)=version_descriptor.get("resolved").and_then(Value::as_str).filter(|s|valid_location(s))else{break};
                 if !visited.insert(target.to_owned()){break}
-                let Some(next)=metadata.get(target)else{break};version_descriptor=next;
+                let Some(next)=metadata.get(target)else{break};
+                if next.contains_key("link")&&!next.get("link").is_some_and(Value::is_boolean){codes.insert("NPM_LINK_METADATA_INVALID".into());break}
+                version_descriptor=next;
                 if next.get("link").and_then(Value::as_bool)!=Some(true){found=true;target_slot=Some(target.to_owned());break}
             }
-            if !found{codes.insert("NPM_LINK_TARGET_UNKNOWN".into());version_descriptor=&entry.descriptor;}
+            if !found{codes.insert("NPM_LINK_TARGET_UNKNOWN".into());version_descriptor=entry.descriptor;}
         }
-        let identity_descriptor=if target_slot.is_some(){version_descriptor}else{&entry.descriptor};
+        let identity_descriptor=if target_slot.is_some(){version_descriptor}else{entry.descriptor};
         let fallback=slot_name(target_slot.as_deref().unwrap_or(&entry.slot));
         let name=match identity_descriptor.get("name"){Some(Value::String(name)) if valid_name(name)=>Some(name.as_str()),None=>fallback,_=>None};
         let Some(name)=name else{codes.insert("NPM_IDENTITY_INVALID".into());continue};
-        let version=if is_link&&target_slot.is_none(){None}else{version_descriptor.get("version").and_then(Value::as_str).filter(|v|exact_version(v)).map(str::to_owned)};
+        let version=if malformed_link||(is_link&&target_slot.is_none()){None}else{version_descriptor.get("version").and_then(Value::as_str).filter(|v|exact_version(v)).map(str::to_owned)};
         if version.is_none(){codes.insert("NPM_VERSION_UNKNOWN".into());}
         let index=packages.len();slots.insert(entry.slot.clone(),index);
         if let Some(target)=target_slot.as_ref(){link_targets.insert(entry.slot.clone(),target.clone());}
-        packages.push(DependencyPackage{id:hash(&format!("{environment_id}\0{}",entry.slot)),name:name.into(),version,direct_status:"UNKNOWN".into(),source:source_kind(&entry.descriptor),slot_hash:hash(&entry.slot)});
+        packages.push(DependencyPackage{id:hash(&format!("{environment_id}\0{}",entry.slot)),name:name.into(),version,direct_status:"UNKNOWN".into(),source:if malformed_link{"UNKNOWN".into()}else{source_kind(entry.descriptor)},slot_hash:hash(&entry.slot)});
         descriptors.push(entry);
     }
     let direct_fields=[("dependencies","DEPENDENCY"),("devDependencies","DEV"),("optionalDependencies","OPTIONAL"),("peerDependencies","PEER")];
     let manifest_value=manifest.filter(|b|b.len()<=1024*1024).and_then(|b|serde_json::from_slice::<Value>(b).ok());
     if manifest.is_some()&&manifest_value.is_none(){codes.insert("NPM_MANIFEST_INVALID".into());}
-    let direct_root=if version==1{manifest_value.as_ref().and_then(Value::as_object)}else{metadata.get("").or_else(||manifest_value.as_ref().and_then(Value::as_object))};
+    let direct_root=if version==1{manifest_value.as_ref().and_then(Value::as_object)}else{metadata.get("").copied().or_else(||manifest_value.as_ref().and_then(Value::as_object))};
     if let Some(descriptor)=direct_root.filter(|d|direct_fields.iter().any(|(field,_)|d.get(*field).is_some_and(Value::is_object))){
         let complete=direct_fields.iter().all(|(field,_)|descriptor.get(*field).is_none_or(|value|value.as_object().is_some_and(|names|names.iter().all(|(name,spec)|valid_name(name)&&spec.as_str().is_some_and(|s|s.len()<=4096&&!s.chars().any(char::is_control))))));
         if complete{for package in &mut packages{package.direct_status="TRANSITIVE".into()}}else{codes.insert("NPM_DIRECT_RELATION_UNKNOWN".into());}
@@ -217,7 +221,7 @@ mod tests {
     }
     #[test]fn version_specifiers_are_not_exact_observations(){
         let g=parse(json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"a":"*"}},"node_modules/a":{"version":"https://user:secret@example.invalid/private.tgz","resolved":"https://user:secret@example.invalid/private.tgz"}}}));
-        assert_eq!(g.packages.len(),1);assert!(g.packages[0].version.is_none());assert_ne!(g.packages[0].source,"PUBLIC_REGISTRY_METADATA");
+        assert_eq!(g.packages.len(),1);assert!(g.packages[0].version.is_none());assert_ne!(g.packages[0].source,"NPM_REGISTRY_METADATA");
         let text=serde_json::to_string(&g).unwrap();assert!(!text.contains("secret")&&!text.contains("example.invalid"));
     }
     #[test]fn npm_alias_uses_explicit_package_identity(){
