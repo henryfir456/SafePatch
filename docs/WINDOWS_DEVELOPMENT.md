@@ -79,3 +79,25 @@ In the npm project section, enter one local absolute directory containing `packa
 The table shows declared package names, exact versions when valid, DIRECT/TRANSITIVE/UNKNOWN relationships and metadata source. Search and relationship filters operate locally; use the next/previous buttons for more than 200 rows, and select a package to inspect its declared outgoing dependency edges. Restart restores the latest npm snapshot without requiring the private directory to be stored or re-entered. Enter it again only to perform another scan.
 
 No npm, Node, lifecycle script or project binary is executed. Lockfile declarations are not installed-package proof; PARTIAL and UNKNOWN states remain visible. Unsupported formats, unsafe paths and failures use stable codes without revealing the selected path. See [npm verification and limits](M2_NPM_VERIFICATION.md) for the separate automated and actual-device evidence gates.
+
+## Selected Python environment (#8)
+
+In the Python section, enter one local absolute interpreter installation directory or venv root, then click **Scan Python metadata**. **Cancel Python scan** targets the active scan. Windows, npm and Python share one active-scan slot and keep separate latest results. The Python table supports local search and 200-row pages; restart reloads its local snapshot without storing the selected private path.
+
+The collector reads only fixed metadata files under the selected held directory boundary: root/Scripts python.exe PE resource bytes, pyvenv.cfg, and direct Lib/site-packages .dist-info/METADATA plus INSTALLER. It does not execute interpreters, pip, activation scripts, extensions, package code or .pth content, and never follows the cfg home/executable/command. PE metadata does not establish executable identity, publisher trust or install origin. The venv declared-version hint remains separate from the observed resource version. Installed distribution metadata does not prove executable contents, public PyPI origin or direct/transitive dependency relationships; those relationships remain UNKNOWN.
+
+Missing, unsafe, malformed and bounded-out observations have explicit coverage codes. Junction/reparse ancestors and metadata hardlinks are rejected. UNC/removable roots, legacy egg-info, editable links, base/user site packages and other import paths are outside this slice. No package/advisory network requests occur.
+
+For an explicitly selected existing environment, after verifying this repository's CI artifact digest, use its actual extracted paths:
+
+```powershell
+$env:SAFEPATCH_PYTHON_ENVIRONMENT_ROOT = 'C:\Python313' # Replace with your selected existing root.
+.\target\debug\python_probe.exe
+$scan = Start-Process .\target\release\safepatch-acceptance.exe -ArgumentList '--acceptance-python' -WindowStyle Hidden -PassThru -Wait
+$scan.ExitCode
+$restart = Start-Process .\target\release\safepatch-acceptance.exe -ArgumentList '--acceptance-python-restart' -WindowStyle Hidden -PassThru -Wait
+$restart.ExitCode
+Remove-Item Env:\SAFEPATCH_PYTHON_ENVIRONMENT_ROOT
+```
+
+These commands run only SafePatch's own probe/application. The private selected root is passed to the child helper through stdin, not command-line interpolation. Probe and acceptance data stays beside the extracted binaries; public reports contain only aggregate counts/stable codes. Do not substitute authored fixture tests for actual installed-environment evidence. See [Python verification and limits](M2_PYTHON_VERIFICATION.md) for current gate status.
