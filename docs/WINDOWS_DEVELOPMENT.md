@@ -14,6 +14,7 @@ npm run build
 npm test
 npm run test:schema
 powershell -NoProfile -NonInteractive -File scripts/test-adapter.ps1
+powershell -NoProfile -NonInteractive -File scripts/test-vscode.ps1
 cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
 cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 npm run tauri -- dev
@@ -64,4 +65,6 @@ $restart=Start-Process .\safepatch-acceptance.exe -ArgumentList '--acceptance-re
 $restart.ExitCode
 ```
 
-The acceptance binary writes only local `desktop-acceptance.sqlite`, `desktop-acceptance.json`, and `desktop-restart.json` beside itself, bounded to 150 seconds. JSON reports contain only counts, internal scan ID and booleans, never the inventory. This is automated native-WebView acceptance, distinct from human-visible/manual UI review and installer acceptance. The probe and desktop executable are in different subdirectories of the CI artifact (`target/debug` vs `target/release`); use their actual paths after extraction.
+The acceptance binary writes only local `desktop-acceptance.sqlite`, `desktop-acceptance.json`, and `desktop-restart.json` beside itself, bounded to 170 seconds. JSON reports contain only counts, internal scan ID and booleans, never the inventory. This is automated native-WebView acceptance, distinct from human-visible/manual UI review and installer acceptance. The probe and desktop executable are in different subdirectories of the CI artifact (`target/debug` vs `target/release`); use their actual paths after extraction.
+
+The M2 VS Code collector is included in the same scan and source filters. [VS Code coverage](M2_VSCODE_VERIFICATION.md) documents profiles, bounded metadata traversal and limits. The combined adapter's outer watchdog is now 125 seconds; the original M1-only 100-second bound described above predates this collector.

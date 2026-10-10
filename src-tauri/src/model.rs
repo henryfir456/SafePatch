@@ -9,6 +9,8 @@ pub struct Provenance {
     pub scope: String,
     pub view: String,
     pub catalog_source: Option<String>,
+    #[serde(default)]
+    pub profile_ref: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Asset {
@@ -56,6 +58,8 @@ pub struct RawRecord {
     pub scope: String,
     pub view: String,
     pub catalog_source: Option<String>,
+    #[serde(default)]
+    pub profile_ref: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,10 +90,11 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
     }
     let mut assets: BTreeMap<String, Asset> = BTreeMap::new();
     for r in output.records {
-        if !matches!(r.scanner.as_str(), "registry" | "winget") || !hash_valid(&r.source_id)
+        if !matches!(r.scanner.as_str(), "registry" | "winget" | "vscode" | "vscode-extension") || !hash_valid(&r.source_id)
             || r.install_path_hash.as_ref().is_some_and(|s| !hash_valid(s))
             || !matches!(r.scope.as_str(), "machine" | "user" | "unknown")
-            || !matches!(r.view.as_str(), "Registry64" | "Registry32" | "catalog")
+            || !matches!(r.view.as_str(), "Registry64" | "Registry32" | "catalog" | "metadata")
+            || r.profile_ref.as_ref().is_some_and(|s| s.is_empty() || s.len()>128 || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b==b'_' || b==b'-'))
             || r.installation_source != "UNKNOWN" {
             return Err("ADAPTER_INVALID_RECORD");
         }
@@ -104,7 +109,7 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
         let identity = serde_json::to_string(&(&r.scanner, &r.source_id, &r.scope, view_identity,
             &name.to_lowercase(), &publisher.as_ref().map(|s| s.to_lowercase()), &version, &r.install_path_hash)).map_err(|_| "IDENTITY_FAILED")?;
         let id = hash(&identity);
-        let provenance = Provenance { scanner: r.scanner, source_id: r.source_id, scope: r.scope, view: r.view, catalog_source: clean(r.catalog_source) };
+        let provenance = Provenance { scanner: r.scanner, source_id: r.source_id, scope: r.scope, view: r.view, catalog_source: clean(r.catalog_source),profile_ref:r.profile_ref };
         if let Some(existing) = assets.get_mut(&id) {
             if !existing.provenance.iter().any(|p| p.scanner == provenance.scanner && p.source_id == provenance.source_id && p.scope == provenance.scope && p.view == provenance.view) {
                 existing.provenance.push(provenance);
@@ -138,7 +143,7 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn record() -> RawRecord { RawRecord { display_name: "Example".into(),publisher:Some("Vendor".into()),installed_version:Some("1".into()),normalized_id:None,install_path_hash:Some(hash("path")),installation_source:"UNKNOWN".into(),scanner:"registry".into(),source_id:hash("key"),scope:"user".into(),view:"Registry64".into(),catalog_source:None } }
+    fn record() -> RawRecord { RawRecord { display_name: "Example".into(),publisher:Some("Vendor".into()),installed_version:Some("1".into()),normalized_id:None,install_path_hash:Some(hash("path")),installation_source:"UNKNOWN".into(),scanner:"registry".into(),source_id:hash("key"),scope:"user".into(),view:"Registry64".into(),catalog_source:None,profile_ref:None } }
     fn run(records:Vec<RawRecord>)->Vec<Asset>{normalize(AdapterOutput{records,coverage:vec![]},"now").unwrap().0}
     #[test] fn reflected_views_merge_but_preserve_provenance(){let a=record();let mut b=a.clone();b.view="Registry32".into();let r=run(vec![a,b]);assert_eq!(r.len(),1);assert_eq!(r[0].provenance.len(),2);}
     #[test] fn multiple_versions_paths_scopes_and_vendors_stay_separate(){for field in 0..4 {let a=record();let mut b=a.clone();match field{0=>b.installed_version=Some("2".into()),1=>b.install_path_hash=Some(hash("another")),2=>b.scope="machine".into(),_=>b.publisher=Some("Other Vendor".into())};assert_eq!(run(vec![a,b]).len(),2);}}
@@ -146,4 +151,5 @@ mod tests {
     #[test] fn vendor_collision_has_no_duplicate_group(){let a=record();let mut b=a.clone();b.publisher=Some("Other Vendor".into());assert!(run(vec![a,b]).iter().all(|a|a.duplicate_group.is_none()));}
     #[test] fn controls_and_unknown_version_are_handled_as_data(){let mut a=record();a.display_name="<script>\0payload</script>".into();a.installed_version=Some("Unknown".into());let r=run(vec![a]);assert_eq!(r[0].display_name,"<script>payload</script>");assert_eq!(r[0].installed_version,None);assert_eq!(r[0].identity_confidence,"UNKNOWN");}
     #[test] fn raw_paths_and_fake_scanner_are_rejected(){let mut a=record();a.install_path_hash=Some("C:\\Private".into());assert!(normalize(AdapterOutput{records:vec![a],coverage:vec![]},"now").is_err());let mut b=record();b.scanner="mock".into();assert!(normalize(AdapterOutput{records:vec![b],coverage:vec![]},"now").is_err());}
+    #[test] fn extension_profiles_and_locations_remain_distinct(){let mut a=record();a.scanner="vscode-extension".into();a.view="metadata".into();a.profile_ref=Some("stable-default".into());a.source_id=hash("path/default");let mut b=a.clone();b.profile_ref=Some("stable-abc123".into());b.source_id=hash("path/abc123");let r=run(vec![a,b]);assert_eq!(r.len(),2);assert!(r.iter().all(|a|a.provenance[0].profile_ref.is_some()));}
 }

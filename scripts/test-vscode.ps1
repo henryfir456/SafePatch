@@ -29,8 +29,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $store 'second/package.json'),'{"publisher":"ExamplePublisher","name":"sample-tool","version":"1.2.4"}')
     [IO.File]::WriteAllText((Join-Path $store 'obsolete/package.json'),'{"publisher":"ExamplePublisher","name":"old-tool","version":"1.0.0"}')
     [IO.File]::WriteAllText((Join-Path $store '.obsolete'),'{"obsolete":true}')
-    [IO.File]::WriteAllText((Join-Path $store 'extensions.json'),'[{"identifier":{"id":"ExamplePublisher.sample-tool"},"version":"1.2.3"}]')
-    [IO.File]::WriteAllText((Join-Path $userData 'profiles/abc123/extensions.json'),'[{"identifier":{"id":"ExamplePublisher.sample-tool"},"version":"1.2.4"}]')
+    [IO.File]::WriteAllText((Join-Path $store 'extensions.json'),'[{"identifier":{"id":"ExamplePublisher.sample-tool"},"version":"1.2.3","relativeLocation":"first"}]')
+    [IO.File]::WriteAllText((Join-Path $userData 'profiles/abc123/extensions.json'),'[{"identifier":{"id":"ExamplePublisher.sample-tool"},"version":"1.2.4","relativeLocation":"second"}]')
     [IO.File]::WriteAllText((Join-Path $appRoot 'resources/app/package.json'),'{"name":"code-oss","version":"1.99.0"}')
     [IO.File]::WriteAllText((Join-Path $appRoot 'resources/app/product.json'),'{"nameShort":"Visual Studio Code","applicationName":"code"}')
     $marker=Join-Path $testRoot 'UNTRUSTED_CODE_EXECUTED'
@@ -45,9 +45,47 @@ try {
     Assert (@($inventory.records | Where-Object { $_.scanner -eq 'vscode' -and $_.installed_version -eq '1.99.0' }).Count -eq 1) 'application version read from actual manifest'
     Assert (-not [IO.File]::Exists($marker)) 'extension entry point must not execute'
     Assert (@($inventory.coverage | Where-Object { $_.scanner -eq 'vscode-extension' -and $_.status -eq 'PARTIAL' }).Count -eq 1) 'metadata and profile coverage uncertainty stays explicit'
-    Assert (($inventory | ConvertTo-Json -Depth 8 -Compress) -notlike ('*'+$testRoot+'*')) 'raw private paths never leave adapter'
+    Assert (-not ($inventory | ConvertTo-Json -Depth 8 -Compress).Contains($testRoot.Replace('\','\\'))) 'raw private paths never leave adapter'
+    $brokenData=Join-Path $testRoot 'BrokenUserData'
+    [void][IO.Directory]::CreateDirectory($brokenData)
+    [IO.File]::WriteAllText((Join-Path $brokenData 'profiles'),'not a directory')
+    $isolated=$null
+    try{$isolated=Get-VSCodeInventory @([pscustomobject]@{extension_root=$store;user_data=$brokenData;application_roots=@($appRoot);channel='stable';scope='user'})}catch{}
+    Assert ($null -ne $isolated -and @($isolated.records).Count -eq 3) 'profile enumeration error preserves extensions and applications'
+    [void][IO.Directory]::CreateDirectory((Join-Path $store 'collision'))
+    [IO.File]::WriteAllText((Join-Path $store 'collision/package.json'),'{"publisher":"ExamplePublisher","name":"sample-tool","version":"1.2.3"}')
+    $collision=Get-VSCodeInventory @([pscustomobject]@{extension_root=$store;user_data=$userData;application_roots=@($appRoot);channel='stable';scope='user'})
+    Assert (@($collision.records | Where-Object {$_.installed_version -eq '1.2.3' -and $_.profile_ref -eq 'stable-default'}).Count -eq 1) 'only indexed location can claim a profile'
+    Assert (@($collision.records | Where-Object {$_.installed_version -eq '1.2.3' -and $_.profile_ref -eq 'UNKNOWN'}).Count -eq 1) 'same ID and version at another location has UNKNOWN profile'
+    [IO.File]::WriteAllText((Join-Path $store '.obsolete'),'{"obsolete":true,"second":[true,false]}')
+    $uncertain=Get-VSCodeInventory @([pscustomobject]@{extension_root=$store;user_data=$userData;application_roots=@($appRoot);channel='stable';scope='user'})
+    Assert (@($uncertain.records | Where-Object scanner -eq 'vscode-extension').Count -eq 3) 'non-boolean obsolete metadata cannot hide an extension'
+    Assert (-not (Test-LocalMetadataPath '\\private.example.invalid\share')) 'UNC metadata roots are rejected without traversal'
+    $brokenStore=Join-Path $testRoot 'BrokenStore'
+    [IO.File]::WriteAllText($brokenStore,'not a directory')
+    $badStore=Get-VSCodeInventory @([pscustomobject]@{extension_root=$brokenStore;user_data=$userData;application_roots=@($appRoot);channel='stable';scope='user'})
+    Assert (@($badStore.records | Where-Object scanner -eq 'vscode').Count -eq 1) 'extension enumeration error preserves applications'
+    $malformed=Join-Path $testRoot 'malformed.json'
+    [IO.File]::WriteAllText($malformed,'{invalid json}')
+    $rejected=$false
+    try{Read-LocalMetadataJson $malformed}catch{$rejected=$_.Exception.Message -eq 'METADATA_JSON_INVALID'}
+    Assert $rejected 'corrupt JSON has stable failure code'
+    [IO.File]::WriteAllText($malformed,('x'*1048577))
+    $rejected=$false
+    try{Read-LocalMetadataJson $malformed}catch{$rejected=$_.Exception.Message -eq 'METADATA_SIZE_LIMIT'}
+    Assert $rejected 'oversized metadata is bounded'
+    $uriEntry=@([pscustomobject]@{identifier=@{id='ExamplePublisher.sample-tool'};version='1.2.3';location=@{scheme='file';path=('/'+(Join-Path $store 'first').Replace('\','/'))}})
+    [IO.File]::WriteAllText((Join-Path $store 'extensions.json'),(ConvertTo-Json -InputObject $uriEntry -Depth 5))
+    $uriInventory=Get-VSCodeInventory @([pscustomobject]@{extension_root=$store;user_data=$userData;application_roots=@($appRoot);channel='stable';scope='user'})
+    Assert (@($uriInventory.records | Where-Object {$_.installed_version -eq '1.2.3' -and $_.profile_ref -eq 'stable-default'}).Count -eq 1) 'URI profile location works without optional authority'
+    $versionedRoot=Join-Path $testRoot 'VersionedApplication'
+    $versionedMetadata=Join-Path $versionedRoot 'c0ffee/resources/app'
+    [void][IO.Directory]::CreateDirectory($versionedMetadata)
+    foreach($name in @('package','product')){[IO.File]::Copy((Join-Path $appRoot ('resources/app/'+$name+'.json')),(Join-Path $versionedMetadata ($name+'.json')))}
+    $versioned=Get-VSCodeInventory @([pscustomobject]@{extension_root=$brokenStore;user_data=$userData;application_roots=@($versionedRoot);channel='stable';scope='user'})
+    Assert (@($versioned.records | Where-Object {$_.scanner -eq 'vscode' -and $_.installed_version -eq '1.99.0'}).Count -eq 1) 'versioned VS Code installation layout is inventoried'
 } finally {
     $resolved=[IO.Path]::GetFullPath($testRoot)
     if($resolved.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase) -and [IO.Directory]::Exists($resolved)){Remove-Item -LiteralPath $resolved -Recurse -Force}
 }
-Write-Output 'VS Code metadata assertions: PASS (16). Authored files; not device acceptance.'
+Write-Output 'VS Code metadata assertions: PASS (26). Authored files; not device acceptance.'
