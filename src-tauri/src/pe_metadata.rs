@@ -148,6 +148,14 @@ mod tests {
             let p=parse_pe_metadata(&fixture(false,&[(key,value)])).unwrap();let text=serde_json::to_string(&p).unwrap();assert!(!text.contains("secret")&&!text.contains("private"),"field {key}");
         }}
     }
+    #[test]fn retained_utf16_values_require_a_nul_terminator(){
+        for key in ["ProductVersion","FileVersion"]{
+            let mut input=fixture(false,&[(key,"3.13.2")]);let needle:Vec<_>="3.13.2".encode_utf16().flat_map(u16::to_le_bytes).collect();let start=input.windows(needle.len()).position(|v|v==needle).unwrap();
+            let block_start=start-((6+(key.len()+1)*2+3)&!3);input[block_start+2..block_start+4].copy_from_slice(&6u16.to_le_bytes());
+            assert!(parse_pe_metadata(&input).is_err(),"unterminated {key}");
+        }
+        assert!(parse_pe_metadata(&fixture(false,&[("ProductVersion","")])).unwrap().product_version.is_none());
+    }
     #[test]fn malformed_offsets_truncation_and_absence_have_stable_errors(){
         let valid=fixture(false,&[("ProductVersion","3.13.2")]);for end in [0,2,60,128,152,200,512,valid.len()-1]{assert!(parse_pe_metadata(&valid[..end]).is_err());}
         let mut poisoned=valid.clone();poisoned[60..64].copy_from_slice(&u32::MAX.to_le_bytes());assert!(parse_pe_metadata(&poisoned).is_err());
