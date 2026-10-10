@@ -9,6 +9,7 @@ mod local {
     use crate::{model::hash,npm::{parse_lock,MAX_LOCK_BYTES}};
     use std::{fs::{self,File,OpenOptions},io::Read,os::windows::{fs::{MetadataExt,OpenOptionsExt},io::AsRawHandle},path::PathBuf,sync::atomic::Ordering};
     use windows_sys::Win32::Storage::FileSystem::*;
+    use windows_sys::Win32::System::WindowsProgramming::{DRIVE_FIXED, DRIVE_RAMDISK};
     fn cancelled(cancel:&AtomicBool)->Result<(),&'static str>{if cancel.load(Ordering::Relaxed){Err("CANCELLED")}else{Ok(())}}
     fn lexical_root(root:&Path)->Result<(),&'static str>{
         let text=root.to_str().ok_or("NPM_ROOT_INVALID")?;let bytes=text.as_bytes();
