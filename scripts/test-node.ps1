@@ -54,8 +54,31 @@ try{
     Assert (@($inventory.records.source_id | Select-Object -Unique).Count -eq 3) 'multiple locations remain distinct'
     Assert ($inventory.coverage[0].status -eq 'PARTIAL') 'known roots are explicitly incomplete'
     Assert (-not ($inventory | ConvertTo-Json -Depth 8 -Compress).Contains($testRoot.Replace('\','\\'))) 'raw private runtime paths do not leave adapter'
+    foreach($file in @('versions/v22/node32.exe','versions/v22/node64.exe','nvs/24.0.0/x64/node.exe','nvs/24.0.0/arm64/node.exe','fnm/v24/installation/node.exe')){
+        $target=Join-Path $testRoot $file
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+        [IO.File]::WriteAllText($target,'not executable; never invoke')
+    }
+    $managers=@($roots[1],[pscustomobject]@{path=(Join-Path $testRoot 'nvs');layout='nvs';scope='user';hint='nvs'},[pscustomobject]@{path=(Join-Path $testRoot 'fnm');layout='fnm';scope='user';hint='fnm'})
+    $managed=Get-NodeInventory $managers $schedule
+    Assert (@($managed.records).Count -eq 7) 'inactive NVM architectures, nested NVS architectures and fnm installation directories must be read'
+    Assert (@($managed.records.source_id | Select-Object -Unique).Count -eq 7) 'manager architectures keep distinct identities'
+    $mixed=[pscustomobject]@{path=$roots[0].path.Replace('\','/');layout='direct';scope='unknown';hint='path'}
+    Assert (@((Get-NodeInventory @($roots[0],$mixed) $schedule).records).Count -eq 1) 'same mixed-separator location deduplicates'
+    $bad=[pscustomobject]@{path=(Join-Path $testRoot 'direct/node.exe');layout='versions';scope='unknown';hint='nvm'}
+    $isolated=Get-NodeInventory @($bad,$roots[0]) $schedule
+    Assert (@($isolated.records).Count -eq 1 -and $isolated.coverage[0].codes -contains 'NODE_ROOT_UNAVAILABLE') 'failed manager root preserves healthy runtime'
+    $network=[pscustomobject]@{path='\\invalid.example\never-access';layout='direct';scope='unknown';hint='path'}
+    Assert (@((Get-NodeInventory @($network,$roots[0]) $schedule).records).Count -eq 1) 'UNC input is rejected while local collection continues'
+    $oldCancel=$env:SAFEPATCH_CANCEL_FILE
+    try{
+        $env:SAFEPATCH_CANCEL_FILE=Join-Path $testRoot 'owned-cancel'
+        [IO.File]::WriteAllText($env:SAFEPATCH_CANCEL_FILE,'cancel')
+        $cancelled=Get-NodeInventory $roots $schedule
+        Assert (@($cancelled.records).Count -eq 0 -and $cancelled.coverage[0].codes -contains 'CANCELLED') 'owned cancellation stops metadata collection'
+    }finally{$env:SAFEPATCH_CANCEL_FILE=$oldCancel}
 }finally{
     $resolved=[IO.Path]::GetFullPath($testRoot)
     if($resolved.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase) -and [IO.Directory]::Exists($resolved)){Remove-Item -LiteralPath $resolved -Recurse -Force}
 }
-Write-Output 'Node metadata assertions: PASS (21). Authored metadata/files; not device acceptance.'
+Write-Output 'Node metadata assertions: PASS (27). Authored metadata/files; not device acceptance.'

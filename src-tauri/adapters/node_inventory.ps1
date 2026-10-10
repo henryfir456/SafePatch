@@ -62,12 +62,12 @@ function Get-NodeMetadataRoots {
         [pscustomobject]@{path=[IO.Path]::Combine($roaming,'nvm');layout='versions';scope='user';hint='nvm'},
         [pscustomobject]@{path=[IO.Path]::Combine($local,'fnm/node-versions');layout='fnm';scope='user';hint='fnm'},
         [pscustomobject]@{path=[IO.Path]::Combine($local,'Volta/tools/image/node');layout='versions';scope='user';hint='volta'},
-        [pscustomobject]@{path=[IO.Path]::Combine($local,'nvs/node');layout='versions';scope='user';hint='nvs'})){$root}
+        [pscustomobject]@{path=[IO.Path]::Combine($local,'nvs/node');layout='nvs';scope='user';hint='nvs'})){$root}
     foreach($manager in @(@('NVM_HOME','nvm','versions'),@('FNM_DIR','fnm','fnm'),@('VOLTA_HOME','volta','volta'),@('NVS_HOME','nvs','nvs'))){
         $configured=[Environment]::GetEnvironmentVariable($manager[0])
         if([string]::IsNullOrWhiteSpace($configured)){continue}
         $suffix=if($manager[1] -eq 'fnm'){'node-versions'}elseif($manager[1] -eq 'volta'){'tools/image/node'}elseif($manager[1] -eq 'nvs'){'node'}else{''}
-        [pscustomobject]@{path=[IO.Path]::Combine($configured,$suffix);layout=if($manager[1] -eq 'fnm'){'fnm'}else{'versions'};scope='unknown';hint=$manager[1]}
+        [pscustomobject]@{path=[IO.Path]::Combine($configured,$suffix);layout=if($manager[1] -eq 'fnm'){'fnm'}elseif($manager[1] -eq 'nvs'){'nvs'}else{'versions'};scope='unknown';hint=$manager[1]}
     }
     $pathValue=[Environment]::GetEnvironmentVariable('PATH')
     if($null -ne $pathValue){$count=0;foreach($directory in $pathValue.Split(';')){if($count++ -ge 256){break};if($directory.Length -gt 0 -and $directory.Length -le 4096){[pscustomobject]@{path=$directory;layout='direct';scope='unknown';hint='path'}}}}
@@ -89,18 +89,24 @@ function Get-NodeInventory([object[]]$Roots=$null,$Schedule=$null) {
             if(-not(Test-LocalMetadataPath $root.path)){continue}
             $directories=[Collections.Generic.List[string]]::new()
             if($root.layout -eq 'direct'){$directories.Add($root.path)}
-            elseif($root.layout -in @('versions','fnm')){
+            elseif($root.layout -in @('versions','fnm','nvs')){
                 $count=0
                 foreach($directory in [IO.Directory]::EnumerateDirectories($root.path)){
                     if(Test-Cancelled -or $timer.Elapsed.TotalSeconds -gt 15 -or $count++ -ge 64){[void]$codes.Add('NODE_METADATA_LIMIT');break}
                     if(-not(Test-LocalMetadataPath $directory)){continue}
-                    $directories.Add($(if($root.layout -eq 'fnm'){[IO.Path]::Combine($directory,'installation')}else{$directory}))
+                    if($root.layout -eq 'nvs'){
+                        foreach($architecture in @('x64','x86','arm64')){$directories.Add([IO.Path]::Combine($directory,$architecture))}
+                    }else{$directories.Add($(if($root.layout -eq 'fnm'){[IO.Path]::Combine($directory,'installation')}else{$directory}))}
                 }
             }else{[void]$codes.Add('NODE_LAYOUT_UNSUPPORTED');continue}
             foreach($directory in $directories){
                 if(Test-Cancelled){[void]$codes.Add('CANCELLED');break}
                 if($timer.Elapsed.TotalSeconds -gt 15 -or $records.Count -ge 200){[void]$codes.Add('NODE_METADATA_LIMIT');break}
-                $binary=[IO.Path]::Combine($directory,'node.exe')
+                $fileNames=if($root.hint -eq 'nvm'){@('node.exe','node32.exe','node64.exe')}else{@('node.exe')}
+                foreach($fileName in $fileNames){
+                if(Test-Cancelled){[void]$codes.Add('CANCELLED');break}
+                if($timer.Elapsed.TotalSeconds -gt 15 -or $records.Count -ge 200){[void]$codes.Add('NODE_METADATA_LIMIT');break}
+                $binary=[IO.Path]::Combine($directory,$fileName)
                 if(-not(Test-LocalMetadataPath $binary)){continue}
                 $binary=[IO.Path]::GetFullPath($binary).Replace('/','\')
                 if(-not$seen.Add($binary)){continue}
@@ -115,6 +121,7 @@ function Get-NodeInventory([object[]]$Roots=$null,$Schedule=$null) {
                 $record | Add-Member -NotePropertyName support -NotePropertyValue (Get-NodeSupport $record.installed_version $Schedule)
                 if($record.support.status -eq 'UNKNOWN'){[void]$codes.Add('NODE_SUPPORT_UNKNOWN')}
                 $records.Add($record)
+                }
             }
         }catch{[void]$codes.Add('NODE_ROOT_UNAVAILABLE')}
     }
