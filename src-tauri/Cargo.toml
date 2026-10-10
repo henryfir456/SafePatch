@@ -26,7 +26,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_WindowsProgramming"] }
 
 [[bin]]
 name = "safepatch"
@@ -36,3 +36,7 @@ required-features = ["desktop"]
 [[bin]]
 name = "inventory_probe"
 path = "src/bin/inventory_probe.rs"
+
+[[bin]]
+name = "npm_probe"
+path = "src/bin/npm_probe.rs"

@@ -42,6 +42,8 @@ jobs:
         run: npm run tauri -- build --no-bundle -- --locked
       - name: Build real inventory integration probe
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin inventory_probe
+      - name: Build opt-in npm project integration probe
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin npm_probe
       - name: Build instrumented real WebView acceptance executable
         run: |
           Copy-Item src-tauri/target/release/safepatch.exe src-tauri/target/release/safepatch-production.exe
@@ -60,4 +62,5 @@ jobs:
             src-tauri/target/release/safepatch-production.exe
             src-tauri/target/release/safepatch-acceptance.exe
             src-tauri/target/debug/inventory_probe.exe
+            src-tauri/target/debug/npm_probe.exe
           retention-days: 7

@@ -3,8 +3,27 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 const migration=readFileSync(new URL('../src-tauri/migrations/001_initial.sql',import.meta.url),'utf8');
+const projectMigration=readFileSync(new URL('../src-tauri/migrations/002_project_graphs.sql',import.meta.url),'utf8');
+const membershipMigration=readFileSync(new URL('../src-tauri/migrations/003_current_membership.sql',import.meta.url),'utf8');
 function db(){const d=new DatabaseSync(':memory:');d.exec('PRAGMA foreign_keys=ON; BEGIN');d.exec(migration);d.exec('PRAGMA user_version=1; COMMIT');return d;}
 test('initial schema covers architecture and foreign keys',()=>{const d=db();assert.equal(d.prepare('PRAGMA user_version').get().user_version,1);assert.equal(d.prepare('PRAGMA foreign_keys').get().foreign_keys,1);assert.equal(d.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get().n,10);assert.throws(()=>d.prepare("INSERT INTO scan_assets VALUES ('missing','missing','{}')").run(),/FOREIGN KEY/);d.close();});
 test('uncertainty and mutually exclusive finding target are enforced',()=>{const d=db();d.exec("INSERT INTO assets VALUES ('a','windows','Example',NULL,NULL,'UNKNOWN','1',NULL,'UNKNOWN','[]','now')");const q=d.prepare('INSERT INTO findings VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)');q.run('f','a',null,'UNKNOWN','UNKNOWN','REVIEW','{}','now');assert.throws(()=>q.run('x','a',null,'SAFE','HIGH','P0','{}','now'),/CHECK/);assert.throws(()=>q.run('y',null,null,'UNKNOWN','UNKNOWN','REVIEW','{}','now'),/CHECK/);assert.throws(()=>q.run('z','a',null,'UNKNOWN','UNKNOWN','REVIEW','not json','now'),/CHECK/);d.close();});
 test('30 history snapshots preserve versions and reject cross-environment edges',()=>{const d=db();d.exec("INSERT INTO assets VALUES ('a','windows','Example',NULL,NULL,'UNKNOWN','1',NULL,'UNKNOWN','[]','now')");for(let i=0;i<30;i++){d.prepare('INSERT INTO scan_runs VALUES (?, ?, ?, ?, ?, ?, NULL)').run('s'+i,''+i,''+i,'COMPLETE','1','[]');d.prepare('INSERT INTO scan_assets VALUES (?, ?, ?)').run('s'+i,'a',JSON.stringify({installed_version:''+i}));}d.exec("UPDATE assets SET installed_version='30'");assert.equal(d.prepare('SELECT count(*) n FROM scan_runs').get().n,30);assert.equal(JSON.parse(d.prepare("SELECT snapshot_json FROM scan_assets WHERE scan_run_id='s0'").get().snapshot_json).installed_version,'0');d.exec("INSERT INTO environments VALUES ('e1','npm','a',NULL,'now'),('e2','npm','b',NULL,'now'); INSERT INTO packages VALUES ('p1','e1','npm','a','1',1,'lock','now'),('p2','e2','npm','b','1',0,'lock','now')");assert.throws(()=>d.exec("INSERT INTO dependency_edges VALUES ('d','p1','p2','e1')"),/FOREIGN KEY/);d.close();});
 test('failed migration rolls back atomically',()=>{const d=new DatabaseSync(':memory:');d.exec('BEGIN');assert.throws(()=>d.exec(migration+'; INVALID SQL;'));d.exec('ROLLBACK');assert.equal(d.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table'").get().n,0);d.close();});
+test('project migration preserves legacy Windows history and UNKNOWN direction',()=>{const d=db();d.exec("INSERT INTO scan_runs VALUES ('old','now',NULL,'COMPLETE','1','[]',NULL); INSERT INTO environments VALUES ('e','npm','hash',NULL,'now'); INSERT INTO packages VALUES ('p','e','npm','example','1.0.0',0,'UNKNOWN','now'); BEGIN;");d.exec(projectMigration);d.exec('PRAGMA user_version=2; COMMIT');assert.equal(d.prepare("SELECT scope FROM scan_runs WHERE id='old'").get().scope,'windows');assert.equal(d.prepare("SELECT direct_status FROM packages WHERE id='p'").get().direct_status,'UNKNOWN');assert.throws(()=>d.exec("UPDATE packages SET direct_status='SAFE'"),/CHECK/);assert.throws(()=>d.exec("INSERT INTO scan_project_graphs VALUES ('missing','e','{}')"),/FOREIGN KEY/);d.close();});
+test('preview v2 upgrade reconstructs latest membership and alias identity without altering history',()=>{
+  for(const empty of [false,true]){
+    const d=db();d.exec(projectMigration);d.exec("PRAGMA user_version=2; INSERT INTO environments VALUES ('e','npm','hash',NULL,'now'); INSERT INTO packages VALUES ('p','e','npm','first','1.0.0',1,'UNKNOWN','now','DIRECT','slot');");
+    const snapshots=[];
+    for(let i=0;i<(empty?3:2);i++){
+      const graph={observed_at:'now',packages:i===2?[]:[{id:'p',name:i?'second':'first',version:i?'2.0.0':'1.0.0',direct_status:'DIRECT',source:'UNKNOWN',slot_hash:'slot'}]};const snapshot=JSON.stringify(graph);snapshots.push(snapshot);
+      d.prepare("INSERT INTO scan_runs(id,started_at,status,scanner_versions,coverage_json,scope) VALUES (?,?,'PARTIAL','1','[]','npm')").run('s'+i,''+i);
+      d.prepare('INSERT INTO scan_project_graphs VALUES (?,?,?)').run('s'+i,'e',snapshot);
+    }
+    d.exec('BEGIN');d.exec(membershipMigration);d.exec('PRAGMA user_version=3; COMMIT');
+    assert.equal(d.prepare('SELECT count(*) n FROM environment_current_packages').get().n,empty?0:1);
+    if(!empty)assert.deepEqual({...d.prepare('SELECT name,version FROM packages JOIN environment_current_packages ON package_id=packages.id').get()},{name:'second',version:'2.0.0'});
+    assert.equal(d.prepare("SELECT snapshot_json FROM scan_project_graphs WHERE scan_run_id='s0'").get().snapshot_json,snapshots[0]);
+    assert.throws(()=>d.exec("INSERT INTO environment_current_packages VALUES ('e','missing')"),/FOREIGN KEY/);d.close();
+  }
+});

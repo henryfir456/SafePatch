@@ -10,10 +10,10 @@ pub const NODE_SCHEDULE:&str=include_str!("../adapters/node_schedule.json");
 const MAX_OUTPUT:u64=8*1024*1024;
 
 #[cfg(windows)]
-struct OwnedJob(windows_sys::Win32::Foundation::HANDLE);
+pub(crate) struct OwnedJob(windows_sys::Win32::Foundation::HANDLE);
 #[cfg(windows)]
 impl OwnedJob {
-    fn assign(child:&std::process::Child)->Result<Self,String>{
+    pub(crate) fn assign(child:&std::process::Child)->Result<Self,String>{
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::{Foundation::CloseHandle,System::JobObjects::*};
         unsafe {

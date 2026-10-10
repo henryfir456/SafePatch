@@ -1,6 +1,9 @@
 pub mod db;
 pub mod model;
 pub mod windows;
+pub mod npm;
+mod project_files;
+pub mod npm_helper;
 mod instance;
 #[cfg(feature="desktop")]
 pub mod desktop;
@@ -9,7 +12,7 @@ mod acceptance;
 use model::{Asset,Scan};
 use std::{path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicBool,Ordering}}};
 
-struct Active { scan:Scan,cancel:Arc<AtomicBool> }
+struct Active { scan:Scan,cancel:Arc<AtomicBool>,scope:String }
 pub struct ScanService { path:PathBuf,active:Mutex<Option<Active>>,#[cfg(windows)] _instance:instance::InstanceLock }
 impl ScanService {
     pub fn new(path:PathBuf)->Result<Arc<Self>,String>{
@@ -27,7 +30,7 @@ impl ScanService {
         let db=db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?;
         db::insert_scan(&db,&scan).map_err(|_|"DATABASE_START_FAILED")?;
         let cancel=Arc::new(AtomicBool::new(false));
-        *active=Some(Active{scan:scan.clone(),cancel:cancel.clone()});
+        *active=Some(Active{scan:scan.clone(),cancel:cancel.clone(),scope:"windows".into()});
         let service=self.clone();
         let spawned=std::thread::Builder::new().name("safepatch-inventory".into()).spawn(move||{
             let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||windows::collect(cancel.clone(),|percent,phase|{if let Ok(mut guard)=service.active.lock(){if let Some(active)=guard.as_mut(){active.scan.progress=percent;active.scan.phase=phase.into();}}}).and_then(|o|model::normalize(o,&chrono::Utc::now().to_rfc3339()).map_err(String::from)))).unwrap_or_else(|_|Err("SCANNER_PANIC".into()));
@@ -35,6 +38,32 @@ impl ScanService {
         });
         if spawned.is_err(){drop(active);self.complete(Err("SCAN_WORKER_FAILED".into()),false);return Err("SCAN_WORKER_FAILED".into())}
         Ok(scan)
+    }
+    pub fn start_project(self:&Arc<Self>,root:String)->Result<Scan,String>{
+        if root.is_empty()||root.len()>4096||root.chars().any(char::is_control){return Err("NPM_ROOT_INVALID".into())}
+        let mut active=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?;
+        if active.as_ref().is_some_and(|a|a.scan.status=="RUNNING"){return Err("SCAN_ALREADY_RUNNING".into())}
+        let scan=Scan{id:uuid::Uuid::new_v4().to_string(),status:"RUNNING".into(),phase:"reading selected npm metadata".into(),progress:10,started_at:chrono::Utc::now().to_rfc3339(),finished_at:None,coverage:vec![],error_code:None};
+        db::insert_scoped_scan(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,&scan,"npm").map_err(|_|"DATABASE_START_FAILED")?;
+        let cancel=Arc::new(AtomicBool::new(false));*active=Some(Active{scan:scan.clone(),cancel:cancel.clone(),scope:"npm".into()});
+        let service=self.clone();
+        let spawned=std::thread::Builder::new().name("safepatch-npm".into()).spawn(move||{
+            let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||npm_helper::collect(std::path::Path::new(&root),cancel.clone()))).unwrap_or_else(|_|Err("NPM_WORKER_FAILED".into()));
+            service.complete_project(result,cancel.load(Ordering::Relaxed));
+        });
+        if spawned.is_err(){drop(active);self.complete_project(Err("NPM_WORKER_FAILED".into()),false);return Err("NPM_WORKER_FAILED".into())}
+        Ok(scan)
+    }
+    fn complete_project(&self,result:Result<npm::DependencyGraph,String>,cancelled:bool){
+        if let Ok(mut guard)=self.active.lock(){if let Some(active)=guard.as_mut(){
+            let graph=match result{
+                Ok(graph) if !cancelled=>{active.scan.status="PARTIAL".into();active.scan.coverage=vec![model::Coverage{scanner:"npm-lockfile".into(),status:"PARTIAL".into(),count:graph.packages.len(),codes:graph.codes.clone()}];Some(graph)},
+                Ok(_)=>{active.scan.status="CANCELLED".into();None},
+                Err(code)=>{active.scan.status=if cancelled||code=="CANCELLED"{"CANCELLED"}else{"FAILED"}.into();active.scan.error_code=Some(code);None}
+            };
+            active.scan.finished_at=Some(chrono::Utc::now().to_rfc3339());active.scan.phase="finished".into();active.scan.progress=100;
+            if let Err(code)=db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED".to_string()).and_then(|mut db|db::finish_project(&mut db,&active.scan,graph.as_ref())){active.scan.status="FAILED".into();active.scan.error_code=Some(code);}
+        }}
     }
     fn complete(&self,result:Result<(Vec<Asset>,Vec<model::Coverage>),String>,cancelled:bool){
         if let Ok(mut guard)=self.active.lock(){if let Some(active)=guard.as_mut(){
@@ -49,7 +78,10 @@ impl ScanService {
     fn validate_id(id:&str)->Result<(),String>{uuid::Uuid::parse_str(id).map(|_|()).map_err(|_|"INVALID_SCAN_ID".into())}
     pub fn cancel(&self,id:&str)->Result<(),String>{Self::validate_id(id)?;let guard=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?;if let Some(a)=guard.as_ref(){if a.scan.id==id && a.scan.status=="RUNNING"{a.cancel.store(true,Ordering::Relaxed);return Ok(())}}Err("SCAN_NOT_RUNNING".into())}
     pub fn status(&self,id:&str)->Result<Scan,String>{Self::validate_id(id)?;if let Some(a)=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?.as_ref(){if a.scan.id==id{return Ok(a.scan.clone())}}db::scan(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,Some(id))?.ok_or_else(||"SCAN_NOT_FOUND".into())}
-    pub fn latest(&self)->Result<Option<Scan>,String>{if let Some(a)=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?.as_ref(){return Ok(Some(a.scan.clone()))}db::scan(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,None)}
+    pub fn latest(&self)->Result<Option<Scan>,String>{self.latest_scope("windows")}
+    pub fn latest_project(&self)->Result<Option<Scan>,String>{self.latest_scope("npm")}
+    fn latest_scope(&self,scope:&str)->Result<Option<Scan>,String>{if let Some(a)=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?.as_ref(){if a.scope==scope{return Ok(Some(a.scan.clone()))}}db::scan_in_scope(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,None,scope)}
+    pub fn project_graph(&self,id:&str)->Result<Option<npm::DependencyGraph>,String>{Self::validate_id(id)?;db::project_graph(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,id)}
     pub fn assets(&self,id:&str)->Result<Vec<Asset>,String>{Self::validate_id(id)?;db::assets(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,id)}
 }
 #[cfg(test)]mod tests{
