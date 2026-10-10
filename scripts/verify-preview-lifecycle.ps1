@@ -5,6 +5,7 @@ if($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted
 $report=@{status='NOT_VERIFIED';host='GitHub Windows Server';user_windows_10_11='NOT_VERIFIED';token='restricted same-user token';is_admin=$null;exe_install='NOT_VERIFIED';msi_install='NOT_VERIFIED';payload_identity='NOT_VERIFIED';launch='NOT_VERIFIED';windows_scan='NOT_VERIFIED';cancel='NOT_VERIFIED';npm_scan='NOT_VERIFIED';restart='NOT_VERIFIED';uninstall_retention='NOT_VERIFIED';code='UNREACHED'}
 $uiaEstablished=$false
 . (Join-Path $env:GITHUB_WORKSPACE 'scripts\preview-contracts.ps1')
+$historyHash=$null
 $exeApp=$null;$msiApp=$null;$exeInstalled=$false;$msiInstalled=$false;$sentinel=$null
 $exeDir=Join-Path $StagePath 'owned-exe-install';$msiDir=Join-Path $StagePath 'owned-msi-install'
 $dataRoot=Join-Path $env:LOCALAPPDATA 'io.github.henryfir456.safepatch';$db=Join-Path $dataRoot 'inventory.sqlite'
@@ -75,12 +76,15 @@ try {
 finally {
  Close-Own $exeApp;Close-Own $msiApp
  try {
+  if(Test-Path -LiteralPath $db){$historyHash=(Get-FileHash -LiteralPath $db).Hash}
   if($exeInstalled){$p=Start-Process -FilePath (Join-Path $exeDir 'uninstall.exe') -ArgumentList ('/S _?='+$exeDir) -PassThru;Wait-OwnProcess $p}
   if($msiInstalled){
    if(-not(Test-Path -LiteralPath (Join-Path $msiDir 'safepatch.exe'))){throw 'PREVIEW_CROSS_FORMAT_REMOVAL'}
    if((Get-FileHash -LiteralPath (Join-Path $msiDir 'safepatch.exe')).Hash.ToLowerInvariant() -ne $manifest.production_sha256){throw 'PREVIEW_CROSS_FORMAT_REMOVAL'}
    $p=Start-Process -FilePath $msiexec -ArgumentList ('/x "'+$msi.FullName+'" /qn /norestart') -PassThru;Wait-OwnProcess $p
   }
+  if($historyHash -and (-not(Test-Path -LiteralPath $db) -or (Get-FileHash -LiteralPath $db).Hash -ne $historyHash)){throw 'PREVIEW_HISTORY_REMOVED'}
+  if($historyHash){$report.history_retention='PASS'}
   if($sentinel -and (Test-Path -LiteralPath $sentinel) -and (Get-FileHash -LiteralPath $sentinel).Hash -eq $sentinelHash){$report.uninstall_retention='PASS'}elseif($sentinel){throw 'PREVIEW_DATA_REMOVED'}
  }catch{$report.status='FAILED';$report.code='PREVIEW_UNINSTALL_OR_RETENTION_FAILED'}
  $report|ConvertTo-Json -Depth 4|Set-Content -LiteralPath (Join-Path $StagePath 'ci-lifecycle.json') -Encoding utf8
