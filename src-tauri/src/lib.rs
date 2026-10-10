@@ -114,6 +114,14 @@ impl ScanService {
 }
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn acknowledged_python_cancel_wins_over_stale_worker_flag_and_preserves_current_membership(){
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("db.sqlite");let service=ScanService::new(path.clone()).unwrap();let snapshot=python::fixture_snapshot();
+        let previous=Scan{id:uuid::Uuid::new_v4().to_string(),status:"PARTIAL".into(),phase:"finished".into(),progress:100,started_at:chrono::Utc::now().to_rfc3339(),finished_at:Some(chrono::Utc::now().to_rfc3339()),coverage:vec![],error_code:None};
+        {let mut d=db::open(&path).unwrap();db::insert_scoped_scan(&d,&previous,"python").unwrap();db::finish_python(&mut d,&previous,Some(&snapshot)).unwrap();}
+        let scan=Scan{id:uuid::Uuid::new_v4().to_string(),status:"RUNNING".into(),phase:"reading".into(),progress:10,started_at:chrono::Utc::now().to_rfc3339(),finished_at:None,coverage:vec![],error_code:None};db::insert_scoped_scan(&db::open(&path).unwrap(),&scan,"python").unwrap();
+        *service.active.lock().unwrap()=Some(Active{scan:scan.clone(),cancel:Arc::new(AtomicBool::new(false)),scope:"python".into()});let stale_flag=false;service.cancel(&scan.id).unwrap();let mut empty=snapshot.clone();empty.packages.clear();service.complete_python(Ok(empty),stale_flag);
+        assert_eq!(service.status(&scan.id).unwrap().status,"CANCELLED");assert!(service.python_snapshot(&scan.id).unwrap().is_none());let d=db::open(&path).unwrap();assert_eq!(d.query_row("SELECT count(*) FROM environment_current_packages WHERE environment_id=?1",[&snapshot.environment_id],|r|r.get::<_,usize>(0)).unwrap(),1);
+    }
     #[test]fn ipc_scope_and_ids_are_validated(){let dir=tempfile::tempdir().unwrap();let s=ScanService::new(dir.path().join("db.sqlite")).unwrap();assert_eq!(s.start("C:\\private; execute").err().unwrap(),"UNSUPPORTED_SCOPE");assert_eq!(s.status("../../../secret").err().unwrap(),"INVALID_SCAN_ID");assert!(s.latest().unwrap().is_none());}
     #[cfg(windows)]
     #[test]fn second_instance_cannot_interrupt_live_database(){let dir=tempfile::tempdir().unwrap();let path=dir.path().join("db.sqlite");let owner=ScanService::new(path.clone()).unwrap();assert_eq!(ScanService::new(path.clone()).err().unwrap(),"DATABASE_IN_USE");drop(owner);assert!(ScanService::new(path).is_ok());}
