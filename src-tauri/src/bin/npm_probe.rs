@@ -1,6 +1,6 @@
 //! Opt-in local probe: only aggregate evidence leaves this process.
 use safepatch_lib::{ScanService,npm};
-use std::{path::{Path,PathBuf},time::{Instant,Duration},sync::atomic::AtomicBool};
+use std::{path::PathBuf,time::{Instant,Duration},sync::atomic::AtomicBool};
 fn run()->Result<(),String>{
     let root=PathBuf::from(std::env::var("SAFEPATCH_NPM_PROJECT_ROOT").map_err(|_|"NPM_PROBE_ROOT_REQUIRED")?);
     let directory=std::env::current_exe().map_err(|_|"PROBE_EXE")?.parent().ok_or("PROBE_DIRECTORY")?.to_owned();let path=directory.join("npm-probe.sqlite");
