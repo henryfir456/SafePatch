@@ -97,6 +97,23 @@ mod local {
 }
 #[cfg(windows)]
 pub fn read_python_environment(root:&Path,cancel:&AtomicBool)->Result<PythonSnapshot,&'static str>{local::collect(root,cancel)}
+#[cfg(test)]pub(crate) fn fixture_snapshot()->PythonSnapshot{
+    let root_path_hash=crate::model::hash("owned-test-root");let environment_id=crate::model::hash(&format!("python-environment:{root_path_hash}"));
+    let slot_hash=crate::model::hash("owned-test-slot");let id=crate::model::hash(&format!("{environment_id}:{slot_hash}:demo:1.0"));
+    PythonSnapshot{environment_id,root_path_hash,observed_at:"2026-10-10T00:00:00Z".into(),environment_kind:"VENV_METADATA".into(),venv_metadata:None,interpreters:vec![],packages:vec![PythonPackage{id,name:"demo".into(),display_name:"Demo".into(),version:Some("1.0".into()),direct_status:"UNKNOWN".into(),source:"DIST_INFO_METADATA".into(),installer:"PIP_INSTALLER_METADATA".into(),slot_hash,codes:vec!["INSTALLED_METADATA_NOT_CONTENT_PROOF".into()]}],codes:vec!["INSTALLED_METADATA_NOT_CONTENT_PROOF".into()]}
+}
+#[cfg(test)]mod validation_contracts{
+    use super::*;
+    #[test]fn cache_and_helper_reject_invented_relationships_paths_duplicate_identity_and_versions(){
+        let valid=fixture_snapshot();assert!(validate_snapshot(&valid).is_ok());
+        for field in 0..7{let mut invalid=valid.clone();match field{
+            0=>invalid.packages[0].direct_status="DIRECT".into(),1=>invalid.root_path_hash="C:\\private".into(),
+            2=>invalid.packages.push(invalid.packages[0].clone()),3=>invalid.packages[0].version=Some(">=1.0".into()),
+            4=>invalid.packages[0].source="https://private@server".into(),5=>invalid.environment_id="a".repeat(64),
+            _=>invalid.packages[0].id="a".repeat(64),
+        }assert!(validate_snapshot(&invalid).is_err(),"case {field}");}
+    }
+}
 #[cfg(all(test,windows))]
 mod tests {
     use super::*;

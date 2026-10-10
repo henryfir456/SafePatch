@@ -76,6 +76,20 @@ pub fn assets(db:&Connection,id:&str)->Result<Vec<Asset>,String>{
 }
 #[cfg(test)] mod tests {
     use super::*;
+    #[test]fn python_snapshots_preserve_history_and_remove_only_current_environment_membership(){
+        let temporary=tempfile::tempdir().unwrap();let path=temporary.path().join("python.sqlite");let initial=crate::python::fixture_snapshot();
+        {let mut d=open(&path).unwrap();assert_eq!(d.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),4);
+            for i in 0..2{let mut snapshot=initial.clone();if i==1{snapshot.packages.clear();}let scan=Scan{id:format!("python{i}"),status:"PARTIAL".into(),phase:"finished".into(),progress:100,started_at:i.to_string(),finished_at:Some(i.to_string()),coverage:vec![],error_code:None};insert_scoped_scan(&d,&scan,"python").unwrap();finish_python(&mut d,&scan,Some(&snapshot)).unwrap();}
+            assert_eq!(d.query_row("SELECT count(*) FROM environment_current_packages WHERE environment_id=?1",[&initial.environment_id],|r|r.get::<_,usize>(0)).unwrap(),0);
+            assert_eq!(d.query_row("SELECT count(*) FROM packages WHERE ecosystem='PyPI' AND direct_status='UNKNOWN'",[],|r|r.get::<_,usize>(0)).unwrap(),1);
+        }
+        let d=open(&path).unwrap();assert_eq!(serde_json::to_string(&python_snapshot(&d,"python0").unwrap().unwrap()).unwrap(),serde_json::to_string(&initial).unwrap());assert!(python_snapshot(&d,"python1").unwrap().unwrap().packages.is_empty());assert!(scan(&d,None).unwrap().is_none());assert!(scan_in_scope(&d,None,"python").unwrap().is_some());
+    }
+    #[test]fn invalid_python_snapshot_does_not_commit_terminal_scan_or_packages(){
+        let mut d=Connection::open_in_memory().unwrap();d.execute_batch("PRAGMA foreign_keys=ON").unwrap();migrate(&mut d).unwrap();
+        let scan=Scan{id:"bad-python".into(),status:"PARTIAL".into(),phase:"finished".into(),progress:100,started_at:"now".into(),finished_at:Some("now".into()),coverage:vec![],error_code:None};insert_scoped_scan(&d,&scan,"python").unwrap();
+        let mut invalid=crate::python::fixture_snapshot();invalid.packages[0].direct_status="DIRECT".into();assert!(finish_python(&mut d,&scan,Some(&invalid)).is_err());assert_eq!(scan_in_scope(&d,Some(&scan.id),"python").unwrap().unwrap().status,"RUNNING");assert_eq!(d.query_row("SELECT count(*) FROM packages",[],|r|r.get::<_,usize>(0)).unwrap(),0);
+    }
     #[test]fn migration_is_idempotent_and_rejects_future_schema(){let mut d=Connection::open_in_memory().unwrap();d.execute_batch("PRAGMA foreign_keys=ON").unwrap();migrate(&mut d).unwrap();migrate(&mut d).unwrap();assert_eq!(d.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),3);d.pragma_update(None,"user_version",99).unwrap();assert!(migrate(&mut d).is_err());}
     #[test]fn history_survives_restart_and_interrupted_runs_are_explicit(){let dir=tempfile::tempdir().unwrap();let path=dir.path().join("test.sqlite");{let d=open(&path).unwrap();for i in 0..30{let s=Scan{id:i.to_string(),status:"RUNNING".into(),phase:"queued".into(),progress:0,started_at:i.to_string(),finished_at:None,coverage:vec![],error_code:None};insert_scan(&d,&s).unwrap();}}let d=open(&path).unwrap();assert_eq!(interrupt(&d).unwrap(),30);assert_eq!(scan(&d,Some("0")).unwrap().unwrap().status,"INTERRUPTED");assert_eq!(d.query_row("SELECT count(*) FROM scan_runs",[],|r|r.get::<_,i64>(0)).unwrap(),30);}
     #[test]fn missing_parent_asset_is_rejected(){let mut d=Connection::open_in_memory().unwrap();d.execute_batch("PRAGMA foreign_keys=ON").unwrap();migrate(&mut d).unwrap();assert!(d.execute("INSERT INTO scan_assets VALUES ('missing','missing','{}')",[]).is_err());}
