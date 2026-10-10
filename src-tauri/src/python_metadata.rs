@@ -74,7 +74,7 @@ pub fn parse_distribution(bytes:&[u8],installer:Option<&[u8]>)->Result<Distribut
         if value.len()>256{return Err("PYTHON_METADATA_SIZE_LIMIT")}
         *target=Some(value.to_owned());
     }
-    if !matches!(format.as_deref(),Some("1.0"|"1.1"|"1.2"|"2.0"|"2.1"|"2.2"|"2.3"|"2.4"|"2.5")){return Err("PYTHON_METADATA_FORMAT_UNSUPPORTED")}
+    if !matches!(format.as_deref(),Some("1.0"|"1.1"|"1.2"|"2.1"|"2.2"|"2.3"|"2.4"|"2.5"|"2.6")){return Err("PYTHON_METADATA_FORMAT_UNSUPPORTED")}
     let display_name=name.ok_or("PYTHON_PACKAGE_NAME_INVALID")?;if !valid_name(&display_name){return Err("PYTHON_PACKAGE_NAME_INVALID")}
     let version=version.filter(|v|exact_version(v));let mut codes=vec!["INSTALLED_METADATA_NOT_CONTENT_PROOF".into()];
     if version.is_none(){codes.push("PYTHON_VERSION_UNKNOWN".into())}
