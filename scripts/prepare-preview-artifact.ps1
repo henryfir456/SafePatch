@@ -5,12 +5,18 @@ if($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted
 $stage=Join-Path $env:RUNNER_TEMP ("safepatch-preview-"+$env:GITHUB_RUN_ID+"-"+$env:GITHUB_RUN_ATTEMPT)
 if($Seal){
  $manifest=Get-Content -LiteralPath (Join-Path $stage 'manifest.json') -Raw|ConvertFrom-Json
+ if((Get-FileHash -LiteralPath 'src-tauri/target/release/safepatch.exe').Hash.ToLowerInvariant() -ne $manifest.production_sha256){throw 'PREVIEW_PRODUCTION_OVERWRITTEN'}
+ if((Get-FileHash -LiteralPath (Join-Path $stage 'safepatch.exe')).Hash.ToLowerInvariant() -ne $manifest.production_sha256){throw 'PREVIEW_STAGED_PRODUCTION_CHANGED'}
  $report=Get-Content -LiteralPath (Join-Path $stage 'ci-lifecycle.json') -Raw|ConvertFrom-Json
  if($report.status -eq 'FAILED'){throw 'PREVIEW_LIFECYCLE_FAILED'}
  $manifest|Add-Member -NotePropertyName ci_lifecycle -NotePropertyValue $report -Force
  $manifest|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding utf8
  $lines=Get-ChildItem -LiteralPath $stage -File|Where-Object Name -ne 'SHA256SUMS.txt'|Sort-Object Name|ForEach-Object{(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+$_.Name}
  $lines|Set-Content -LiteralPath (Join-Path $stage 'SHA256SUMS.txt') -Encoding ascii
+ Write-Output ('PREVIEW_SOURCE_COMMIT='+$manifest.source_commit)
+ $manifest.installers|ForEach-Object{Write-Output ('PREVIEW_INSTALLER_SHA256 '+$_.sha256+' '+$_.name)}
+ Write-Output ('PREVIEW_PRODUCTION_SHA256='+$manifest.production_sha256)
+ Write-Output ('PREVIEW_CI_LIFECYCLE='+$report.status)
  Write-Output 'Preview artifact sealed; production-only payload and aggregate reports.'
  return
 }
