@@ -247,4 +247,59 @@ mod tests {
         let g=parse(json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"a":"file:../outside"}},"node_modules/a":{"link":true,"resolved":"../outside","version":"1.2.3"}}}));
         assert!(g.packages[0].version.is_none());
     }
+    #[cfg(windows)]
+    fn project_fixture(directory:&std::path::Path,name:&str){
+        std::fs::create_dir_all(directory).unwrap();
+        let lock=json!({"lockfileVersion":3,"packages":{"":{"dependencies":{name:"1.0.0"}},format!("node_modules/{name}"):{"version":"1.0.0"}}});
+        std::fs::write(directory.join("package-lock.json"),serde_json::to_vec(&lock).unwrap()).unwrap();
+    }
+    #[test]
+    #[cfg(windows)]
+    fn selected_project_is_read_only_and_root_scoped(){
+        let temporary=tempfile::tempdir().unwrap();let directory=temporary.path().join("project");project_fixture(&directory,"known");
+        let lock=std::fs::read(directory.join("package-lock.json")).unwrap();
+        std::fs::write(directory.join(".npmrc"),"token=DO_NOT_READ_OR_UPLOAD").unwrap();
+        std::fs::write(directory.join("package.json"),r#"{"scripts":{"postinstall":"create-unwanted-file"}}"#).unwrap();
+        let graph=read_npm_project(&directory,&AtomicBool::new(false)).unwrap();
+        assert_eq!(graph.packages.len(),1);assert_eq!(graph.lockfile_kind,"package-lock");
+        assert_eq!(std::fs::read(directory.join("package-lock.json")).unwrap(),lock);
+        assert!(!serde_json::to_string(&graph).unwrap().contains("DO_NOT_READ_OR_UPLOAD"));
+        assert!(!directory.join("create-unwanted-file").exists());
+    }
+    #[test]
+    #[cfg(windows)]
+    fn shrinkwrap_precedence_does_not_hide_an_invalid_preferred_file(){
+        let temporary=tempfile::tempdir().unwrap();project_fixture(temporary.path(),"ignored");
+        let preferred=json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"chosen":"1.0.0"}},"node_modules/chosen":{"version":"1.0.0"}}});
+        std::fs::write(temporary.path().join("npm-shrinkwrap.json"),serde_json::to_vec(&preferred).unwrap()).unwrap();
+        let graph=read_npm_project(temporary.path(),&AtomicBool::new(false)).unwrap();assert_eq!(graph.packages[0].name,"chosen");assert_eq!(graph.lockfile_kind,"npm-shrinkwrap");
+        std::fs::write(temporary.path().join("npm-shrinkwrap.json"),b"{").unwrap();
+        assert_eq!(read_npm_project(temporary.path(),&AtomicBool::new(false)).err(),Some("NPM_INVALID_JSON"));
+    }
+    #[test]
+    #[cfg(windows)]
+    fn unsupported_lockfiles_missing_files_and_oversize_are_explicit(){
+        let temporary=tempfile::tempdir().unwrap();
+        assert_eq!(read_npm_project(temporary.path(),&AtomicBool::new(false)).err(),Some("NPM_LOCKFILE_NOT_FOUND"));
+        std::fs::write(temporary.path().join("pnpm-lock.yaml"),"lockfileVersion: 9").unwrap();
+        assert_eq!(read_npm_project(temporary.path(),&AtomicBool::new(false)).err(),Some("NPM_UNSUPPORTED_PROJECT_FORMAT"));
+        let file=std::fs::File::create(temporary.path().join("package-lock.json")).unwrap();file.set_len(MAX_LOCK_BYTES as u64+1).unwrap();drop(file);
+        assert_eq!(read_npm_project(temporary.path(),&AtomicBool::new(false)).err(),Some("NPM_FILE_SIZE_LIMIT"));
+    }
+    #[test]
+    #[cfg(windows)]
+    fn network_traversal_and_cancel_inputs_never_read_a_project(){
+        use std::path::Path;
+        assert_eq!(read_npm_project(Path::new(r"\\invalid.example\private"),&AtomicBool::new(false)).err(),Some("NPM_ROOT_INVALID"));
+        assert_eq!(read_npm_project(Path::new(r"C:\chosen\..\outside"),&AtomicBool::new(false)).err(),Some("NPM_ROOT_INVALID"));
+        assert_eq!(read_npm_project(Path::new(r"C:\never-open"),&AtomicBool::new(true)).err(),Some("CANCELLED"));
+    }
+    #[test]
+    #[cfg(windows)]
+    fn hard_link_metadata_cannot_cross_the_selected_boundary(){
+        let temporary=tempfile::tempdir().unwrap();let directory=temporary.path().join("project");std::fs::create_dir_all(&directory).unwrap();
+        let target=temporary.path().join("outside-lock.json");std::fs::write(&target,serde_json::to_vec(&modern(3)).unwrap()).unwrap();
+        std::fs::hard_link(&target,directory.join("package-lock.json")).unwrap();
+        assert_eq!(read_npm_project(&directory,&AtomicBool::new(false)).err(),Some("NPM_METADATA_UNSAFE"));
+    }
 }
