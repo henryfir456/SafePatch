@@ -16,6 +16,6 @@ Read-only scans by default; no automatic upgrades, arbitrary project execution, 
 Tauri 2 / React / TypeScript / Rust / SQLite. See [Architecture](docs/ARCHITECTURE.md), [MVP Acceptance](docs/MVP_ACCEPTANCE.md), [Security Model](docs/SECURITY_MODEL.md), [Delivery Plan](docs/DELIVERY_PLAN.md), and [Agent Rules](AGENTS.md).
 
 ## Status
-M1 implementation in progress: Tauri/React UI, Rust scan service, SQLite migrations and a real read-only Windows Registry/WinGet adapter. The UI contains no simulated device scan. Vulnerability assessment remains UNKNOWN until later milestones.
+M1's real inventory vertical slice is implemented and passed automated native WebView acceptance on Windows 11: Tauri/React UI, Rust scan service, SQLite migrations, read-only Windows Registry/WinGet scanning, cancellation and restart persistence. The UI contains no simulated device scan. WinGet catalog coverage is explicitly PARTIAL; vulnerability assessment remains UNKNOWN until later milestones. Windows 10, human-visible/manual UI review and installer acceptance are not yet verified.
 
 See [Windows development and operation](docs/WINDOWS_DEVELOPMENT.md) and the explicit [M1 verification record](docs/M1_VERIFICATION.md). Missing tools or a passing fixture test do not establish Windows end-to-end acceptance. Related issues: #2, #3, #4, #13.

@@ -14,10 +14,10 @@ npm run build
 npm test
 npm run test:schema
 powershell -NoProfile -NonInteractive -File scripts/test-adapter.ps1
-cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 npm run tauri -- dev
-npm run tauri -- build --no-bundle
+npm run tauri -- build --no-bundle -- --locked
 ```
 
 Dependencies are pinned in npm's lockfile, fetched from registry.npmjs.org, and installed with lifecycle scripts disabled. Vite uses the declared platform binary dependency. Rust crates are fetched from crates.io; Rust build scripts compile only declared application dependencies. They are never executed for scanned projects. CI action revisions are pinned. Cargo.lock was recovered from the digest-verified initial Windows CI artifact and committed; CI uses `--locked`.
@@ -48,7 +48,7 @@ Cancellation is checked per Registry entry and every 100 ms during WinGet. WinGe
 # Outputs only counts, OS build, coverage and stable codes; no software list.
 powershell -NoProfile -NonInteractive -File scripts/verify-windows-adapter.ps1 -RequireWinGet
 # Through production Rust scanner, normalization, SQLite and restart persistence:
-cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --bin inventory_probe
+cargo run --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin inventory_probe
 ```
 
 Then launch the desktop app, start a scan, confirm actual rows/versions and partial errors are rendered, cancel a second scan, restart and verify persistence. Keep full inventory/screen content local. Public acceptance reports may include aggregate counts and coverage codes only. A unit test, a hosted runner build or the standalone adapter does not establish desktop end-to-end acceptance; record each gate separately in `docs/M1_VERIFICATION.md` and the linked Issues. Installer generation is reserved for M5.
