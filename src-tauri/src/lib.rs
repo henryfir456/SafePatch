@@ -91,3 +91,4 @@ impl ScanService {
     #[test]fn second_instance_cannot_interrupt_live_database(){let dir=tempfile::tempdir().unwrap();let path=dir.path().join("db.sqlite");let owner=ScanService::new(path.clone()).unwrap();assert_eq!(ScanService::new(path.clone()).err().unwrap(),"DATABASE_IN_USE");drop(owner);assert!(ScanService::new(path).is_ok());}
 }
 pub mod python_metadata;
+pub mod pe_metadata;
