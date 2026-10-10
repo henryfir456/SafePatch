@@ -6,7 +6,7 @@ pub fn read_npm_project(_root:&Path,_cancel:&AtomicBool)->Result<DependencyGraph
 #[cfg(not(windows))]
 pub fn npm_metadata_hashes(_root:&Path)->Result<Vec<Option<String>>,&'static str>{Err("WINDOWS_REQUIRED")}
 #[cfg(windows)]
-mod local {
+pub(crate) mod local {
     use super::*;
     use crate::{model::hash,npm::{parse_lock,MAX_LOCK_BYTES}};
     use std::{fs::{self,File,OpenOptions},io::Read,os::windows::{fs::{MetadataExt,OpenOptionsExt},io::AsRawHandle},path::PathBuf,sync::atomic::Ordering};
@@ -45,9 +45,9 @@ mod local {
         let expanded=PathBuf::from(String::from_utf16(&buffer[..count]).map_err(|_|"NPM_METADATA_UNSAFE")?);
         Ok(lexical_key(&expanded))
     }
-    struct Root {path:PathBuf,handle:File,_ancestors:Vec<File>}
+    pub(crate) struct Root {pub(crate) path:PathBuf,handle:File,_ancestors:Vec<File>}
     impl Root {
-        fn open(path:&Path)->Result<Self,&'static str>{
+        pub(crate) fn open(path:&Path)->Result<Self,&'static str>{
             lexical_root(path)?;
             // Acquire from drive root down. OPEN_REPARSE_POINT applies to each leaf;
             // retained handles without DELETE sharing prevent ancestor replacement.
@@ -63,9 +63,10 @@ mod local {
             let handle=handles.pop().ok_or("NPM_ROOT_INVALID")?;
             let path=final_path(&handle)?;Ok(Self{path,handle,_ancestors:handles})
         }
-        fn unchanged(&self)->Result<(),&'static str>{if final_path(&self.handle)?!=self.path{return Err("NPM_ROOT_CHANGED")}Ok(())}
+        pub(crate) fn unchanged(&self)->Result<(),&'static str>{if final_path(&self.handle)?!=self.path{return Err("NPM_ROOT_CHANGED")}Ok(())}
         fn marker_exists(&self,name:&str)->bool{fs::symlink_metadata(self.path.join(name)).is_ok()}
-        fn read_metadata(&self,name:&str,limit:usize,cancel:&AtomicBool)->Result<Option<Vec<u8>>,&'static str>{
+        pub(crate) fn read_metadata(&self,name:&str,limit:usize,cancel:&AtomicBool)->Result<Option<Vec<u8>>,&'static str>{
+            if name.is_empty()||name.contains(['\\','/',':'])||name=="."||name==".."||name.chars().any(char::is_control){return Err("NPM_METADATA_UNSAFE")}
             cancelled(cancel)?;self.unchanged()?;let path=self.path.join(name);
             let metadata=match fs::symlink_metadata(&path){Ok(m)=>m,Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Ok(None),Err(_)=>return Err("NPM_METADATA_UNREADABLE")};
             if !metadata.is_file()||metadata.file_attributes()&FILE_ATTRIBUTE_REPARSE_POINT!=0{return Err("NPM_METADATA_UNSAFE")}
