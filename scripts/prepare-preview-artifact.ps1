@@ -2,6 +2,7 @@
 param([switch]$Seal)
 $ErrorActionPreference='Stop'
 if($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted'){throw 'PREVIEW_CI_ONLY'}
+. (Join-Path $PSScriptRoot 'preview-contracts.ps1')
 $stage=Join-Path $env:RUNNER_TEMP ("safepatch-preview-"+$env:GITHUB_RUN_ID+"-"+$env:GITHUB_RUN_ATTEMPT)
 if($Seal){
  $manifest=Get-Content -LiteralPath (Join-Path $stage 'manifest.json') -Raw|ConvertFrom-Json
@@ -45,7 +46,7 @@ if($commit -notmatch '^[0-9a-f]{40}$'){throw 'PREVIEW_COMMIT_INVALID'}
 $msi=Get-ChildItem -LiteralPath $stage -Filter '*.msi'
 $installer=New-Object -ComObject WindowsInstaller.Installer
 $db=$installer.OpenDatabase($msi.FullName,0)
-function Rows($sql){$view=$db.OpenView($sql);$view.Execute();$result=@();while($record=$view.Fetch()){$row=@();for($i=1;$i -le $record.FieldCount;$i++){$row+=$record.StringData($i)};$result+=,@($row)};$view.Close();return ,$result}
+function Rows($sql){return ,(Read-PreviewMsiRows $db $sql)}
 $properties=Rows 'SELECT Property, Value FROM Property'
 if(@($properties|Where-Object{$_[0] -eq 'ALLUSERS' -and $_[1]}).Count -ne 0){throw 'PREVIEW_MSI_ALLUSERS'}
 $privileges=[int]$db.SummaryInformation(0).Property(15)

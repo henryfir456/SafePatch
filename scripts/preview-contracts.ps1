@@ -3,3 +3,17 @@ function Get-PreviewUiFailureStatus([bool]$ProviderEstablished,[string]$Code) {
  if(-not $ProviderEstablished -and $Code -eq 'PREVIEW_UIA_PROVIDER_UNAVAILABLE'){return 'NOT_VERIFIED'}
  return 'FAILED'
 }
+
+function Read-PreviewMsiRows($Database,[string]$Sql) {
+ $view=$Database.OpenView($Sql)
+ $null=$view.Execute()
+ $result=@()
+ try {
+  while($record=$view.Fetch()){
+   $row=@()
+   for($i=1;$i -le $record.FieldCount;$i++){$row+=$record.StringData($i)}
+   $result+=,@($row)
+  }
+ } finally {$null=$view.Close()}
+ return ,$result
+}
