@@ -13,6 +13,15 @@ pub struct Provenance {
     pub profile_ref: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeSupport {
+    pub status:String,
+    pub end_date:Option<String>,
+    pub source_url:String,
+    pub checked_at:Option<String>,
+    pub evaluated_at:String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Asset {
     pub id: String,
     pub display_name: String,
@@ -25,6 +34,8 @@ pub struct Asset {
     pub duplicate_group: Option<String>,
     pub provenance: Vec<Provenance>,
     pub observed_at: String,
+    #[serde(default)]
+    pub support: Option<RuntimeSupport>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Coverage {
@@ -60,6 +71,8 @@ pub struct RawRecord {
     pub catalog_source: Option<String>,
     #[serde(default)]
     pub profile_ref: Option<String>,
+    #[serde(default)]
+    pub support: Option<RuntimeSupport>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,6 +90,7 @@ fn clean(value: Option<String>) -> Option<String> {
 fn hash_valid(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit())
 }
+fn date_valid(s:&str)->bool{chrono::NaiveDate::parse_from_str(s,"%Y-%m-%d").is_ok_and(|d|d.format("%Y-%m-%d").to_string()==s)}
 pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Coverage>), &'static str> {
     if output.records.len() > 40000 || output.coverage.len() > 8 {
         return Err("ADAPTER_LIMIT");
@@ -90,7 +104,7 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
     }
     let mut assets: BTreeMap<String, Asset> = BTreeMap::new();
     for r in output.records {
-        if !matches!(r.scanner.as_str(), "registry" | "winget" | "vscode" | "vscode-extension") || !hash_valid(&r.source_id)
+        if !matches!(r.scanner.as_str(), "registry" | "winget" | "vscode" | "vscode-extension" | "node") || !hash_valid(&r.source_id)
             || r.install_path_hash.as_ref().is_some_and(|s| !hash_valid(s))
             || !matches!(r.scope.as_str(), "machine" | "user" | "unknown")
             || !matches!(r.view.as_str(), "Registry64" | "Registry32" | "catalog" | "metadata")
@@ -98,6 +112,7 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
             || r.installation_source != "UNKNOWN" {
             return Err("ADAPTER_INVALID_RECORD");
         }
+        if r.support.as_ref().is_some_and(|s|r.scanner!="node" || !matches!(s.status.as_str(),"UNKNOWN"|"CURRENT"|"ACTIVE_LTS"|"MAINTENANCE_LTS"|"MAINTENANCE"|"EOL") || s.source_url!="https://github.com/nodejs/Release/blob/main/schedule.json" || !date_valid(&s.evaluated_at) || s.checked_at.as_ref().is_some_and(|d|!date_valid(d)) || s.end_date.as_ref().is_some_and(|d|!date_valid(d))){return Err("ADAPTER_INVALID_SUPPORT")}
         let name = clean(Some(r.display_name)).or_else(||(r.scanner=="vscode").then(||"VS Code metadata".to_owned())).ok_or("ADAPTER_EMPTY_NAME")?;
         let publisher = clean(r.publisher);
         let version = clean(r.installed_version);
@@ -117,7 +132,7 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
         } else {
             assets.insert(id.clone(), Asset { id, display_name: name, publisher, installed_version: version,
                 normalized_id, install_path_hash: r.install_path_hash, installation_source: "UNKNOWN".into(),
-                identity_confidence: "UNKNOWN".into(), duplicate_group: None, provenance: vec![provenance], observed_at: now.into() });
+                identity_confidence: "UNKNOWN".into(), duplicate_group: None, provenance: vec![provenance], observed_at: now.into(),support:r.support });
         }
     }
     let mut candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -143,7 +158,7 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn record() -> RawRecord { RawRecord { display_name: "Example".into(),publisher:Some("Vendor".into()),installed_version:Some("1".into()),normalized_id:None,install_path_hash:Some(hash("path")),installation_source:"UNKNOWN".into(),scanner:"registry".into(),source_id:hash("key"),scope:"user".into(),view:"Registry64".into(),catalog_source:None,profile_ref:None } }
+    fn record() -> RawRecord { RawRecord { display_name: "Example".into(),publisher:Some("Vendor".into()),installed_version:Some("1".into()),normalized_id:None,install_path_hash:Some(hash("path")),installation_source:"UNKNOWN".into(),scanner:"registry".into(),source_id:hash("key"),scope:"user".into(),view:"Registry64".into(),catalog_source:None,profile_ref:None,support:None } }
     fn run(records:Vec<RawRecord>)->Vec<Asset>{normalize(AdapterOutput{records,coverage:vec![]},"now").unwrap().0}
     #[test] fn reflected_views_merge_but_preserve_provenance(){let a=record();let mut b=a.clone();b.view="Registry32".into();let r=run(vec![a,b]);assert_eq!(r.len(),1);assert_eq!(r[0].provenance.len(),2);}
     #[test] fn multiple_versions_paths_scopes_and_vendors_stay_separate(){for field in 0..4 {let a=record();let mut b=a.clone();match field{0=>b.installed_version=Some("2".into()),1=>b.install_path_hash=Some(hash("another")),2=>b.scope="machine".into(),_=>b.publisher=Some("Other Vendor".into())};assert_eq!(run(vec![a,b]).len(),2);}}
@@ -153,4 +168,5 @@ mod tests {
     #[test] fn raw_paths_and_fake_scanner_are_rejected(){let mut a=record();a.install_path_hash=Some("C:\\Private".into());assert!(normalize(AdapterOutput{records:vec![a],coverage:vec![]},"now").is_err());let mut b=record();b.scanner="mock".into();assert!(normalize(AdapterOutput{records:vec![b],coverage:vec![]},"now").is_err());}
     #[test] fn extension_profiles_and_locations_remain_distinct(){let mut a=record();a.scanner="vscode-extension".into();a.view="metadata".into();a.profile_ref=Some("stable-default".into());a.source_id=hash("path/default");let mut b=a.clone();b.profile_ref=Some("stable-abc123".into());b.source_id=hash("path/abc123");let r=run(vec![a,b]);assert_eq!(r.len(),2);assert!(r.iter().all(|a|a.provenance[0].profile_ref.is_some()));}
     #[test] fn unknown_app_name_preserves_healthy_registry_inventory(){let healthy=record();let mut app=record();app.scanner="vscode".into();app.view="metadata".into();app.display_name="UNKNOWN".into();let r=run(vec![healthy,app]);assert_eq!(r.len(),2);assert!(r.iter().any(|a|a.display_name=="Example"));assert!(r.iter().any(|a|a.display_name=="VS Code metadata"));}
+    #[test]fn node_runtime_paths_and_support_remain_distinct(){let mut a=record();a.scanner="node".into();a.view="metadata".into();a.support=Some(RuntimeSupport{status:"ACTIVE_LTS".into(),end_date:Some("2028-04-30".into()),source_url:"https://github.com/nodejs/Release/blob/main/schedule.json".into(),checked_at:Some("2026-10-10".into()),evaluated_at:"2026-10-10".into()});let mut b=a.clone();b.source_id=hash("second node");b.install_path_hash=Some(hash("second node"));let r=run(vec![a,b]);assert_eq!(r.len(),2);assert!(r.iter().all(|a|a.support.as_ref().unwrap().status=="ACTIVE_LTS"));}
 }

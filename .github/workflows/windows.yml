@@ -31,6 +31,9 @@ jobs:
       - name: VS Code read-only metadata regression tests
         shell: powershell
         run: ./scripts/test-vscode.ps1
+      - name: Node resource and lifecycle regression tests
+        shell: powershell
+        run: ./scripts/test-node.ps1
       - name: Rust unit tests and migrations
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
       - name: Rust static analysis

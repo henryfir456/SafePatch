@@ -5,6 +5,8 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
 pub const SCRIPT:&str=include_str!("../adapters/windows_inventory.ps1");
 pub const VSCODE_SCRIPT:&str=include_str!("../adapters/vscode_inventory.ps1");
+pub const NODE_SCRIPT:&str=include_str!("../adapters/node_inventory.ps1");
+pub const NODE_SCHEDULE:&str=include_str!("../adapters/node_schedule.json");
 const MAX_OUTPUT:u64=8*1024*1024;
 
 #[cfg(windows)]
@@ -50,9 +52,11 @@ pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result
     let dir=tempfile::tempdir().map_err(|_|"SCAN_TEMP_FAILED")?;
     let cancel_file=dir.path().join("cancel");
     let progress_file=dir.path().join("phase");
+    let schedule_file=dir.path().join("node-schedule.json");
+    std::fs::write(&schedule_file,NODE_SCHEDULE).map_err(|_|"SCAN_TEMP_FAILED")?;
     let mut command=Command::new(exe);
     command.args(["-NoLogo","-NoProfile","-NonInteractive","-Command","-"])
-        .env("SAFEPATCH_CANCEL_FILE",&cancel_file).env("SAFEPATCH_PROGRESS_FILE",&progress_file).env("PSModulePath",modules).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        .env("SAFEPATCH_CANCEL_FILE",&cancel_file).env("SAFEPATCH_PROGRESS_FILE",&progress_file).env("SAFEPATCH_NODE_SCHEDULE_FILE",&schedule_file).env("PSModulePath",modules).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
     let mut child=command.spawn().map_err(|_|"ADAPTER_LAUNCH_FAILED")?;
     // Before supplying any script, contain only our child and its descendants.
@@ -66,17 +70,17 @@ pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result
     let output_thread=std::thread::spawn(move||{let mut buffer=Vec::new();stdout.take(MAX_OUTPUT+1).read_to_end(&mut buffer).map(|_|buffer)});
     let error_thread=std::thread::spawn(move||{let mut stderr=stderr;std::io::copy(&mut stderr,&mut std::io::sink())});
     // Strip BOM/CRLF consistently and force a terminating newline for -Command -.
-    let script=format!("{}\n{}\nexit\n",VSCODE_SCRIPT.replace("\r\n","\n"),SCRIPT.replace("\r\n","\n"));
+    let script=format!("{}\n{}\n{}\nexit\n",NODE_SCRIPT.replace("\r\n","\n"),VSCODE_SCRIPT.replace("\r\n","\n"),SCRIPT.replace("\r\n","\n"));
     if stdin.write_all(script.as_bytes()).is_err(){let _=child.kill();let _=child.wait();return Err("ADAPTER_INPUT_FAILED".into())}
     drop(stdin);
     let started=Instant::now();
     let mut previous_phase=String::new();
     let status=loop {
         if cancel.load(Ordering::Relaxed){let _=std::fs::write(&cancel_file,b"cancel");}
-        if let Ok(phase)=std::fs::read_to_string(&progress_file){if phase!=previous_phase{match phase.as_str(){"REGISTRY_DONE"=>progress(45,"Registry complete / querying signed WinGet"),"WINGET_DONE"=>progress(65,"reading VS Code metadata"),"VSCODE_DONE"=>progress(80,"normalizing actual inventory"),_=>{}}previous_phase=phase;}}
+        if let Ok(phase)=std::fs::read_to_string(&progress_file){if phase!=previous_phase{match phase.as_str(){"REGISTRY_DONE"=>progress(45,"Registry complete / querying signed WinGet"),"WINGET_DONE"=>progress(65,"reading VS Code metadata"),"VSCODE_DONE"=>progress(75,"reading Node PE metadata"),"NODE_DONE"=>progress(85,"normalizing actual inventory"),_=>{}}previous_phase=phase;}}
         match child.try_wait(){Ok(Some(status))=>break status,Ok(None)=>{},Err(_)=>{let _=child.kill();let _=child.wait();return Err("ADAPTER_WAIT_FAILED".into())}}
-        // Registry 30s, source verification 15s, WinGet 45s, VS Code 15s; cleanup overhead.
-        if started.elapsed()>Duration::from_secs(125){let _=child.kill();let _=child.wait();return Err("ADAPTER_TIMEOUT".into())}
+        // Registry 30s, source15s, WinGet45s, VSCode15s, Node15s; cleanup overhead.
+        if started.elapsed()>Duration::from_secs(145){let _=child.kill();let _=child.wait();return Err("ADAPTER_TIMEOUT".into())}
         std::thread::sleep(Duration::from_millis(100));
     };
     let output=output_thread.join().map_err(|_|"ADAPTER_READ_FAILED")?.map_err(|_|"ADAPTER_READ_FAILED")?;

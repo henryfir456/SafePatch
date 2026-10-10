@@ -36,6 +36,6 @@ pub fn configure(app:&mut tauri::App)->Result<(),Box<dyn std::error::Error>>{
     let window=app.get_webview_window("main").ok_or("missing main window")?;
     window.hide()?;
     let handle=app.handle().clone();
-    std::thread::spawn(move||{std::thread::sleep(std::time::Duration::from_secs(170));handle.exit(2);});
+    std::thread::spawn(move||{std::thread::sleep(std::time::Duration::from_secs(200));handle.exit(2);});
     Ok(())
 }

@@ -173,6 +173,8 @@ function Invoke-WindowsInventory {
         [pscustomobject]@{scanner='vscode';status='UNKNOWN';count=0;codes=@('VSCODE_COLLECTOR_UNAVAILABLE')},
         [pscustomobject]@{scanner='vscode-extension';status='UNKNOWN';count=0;codes=@('VSCODE_COLLECTOR_UNAVAILABLE')})}}
     if($env:SAFEPATCH_PROGRESS_FILE){[IO.File]::WriteAllText($env:SAFEPATCH_PROGRESS_FILE,'VSCODE_DONE')}
-    [pscustomobject]@{records=@($registry.records)+@($winget.records)+@($vscode.records);coverage=@($registry.coverage)+@($winget.coverage)+@($vscode.coverage)} | ConvertTo-Json -Depth 8 -Compress
+    try{$node=Get-NodeInventory}catch{$node=[pscustomobject]@{records=@();coverage=@([pscustomobject]@{scanner='node';status='UNKNOWN';count=0;codes=@('NODE_COLLECTOR_UNAVAILABLE')})}}
+    if($env:SAFEPATCH_PROGRESS_FILE){[IO.File]::WriteAllText($env:SAFEPATCH_PROGRESS_FILE,'NODE_DONE')}
+    [pscustomobject]@{records=@($registry.records)+@($winget.records)+@($vscode.records)+@($node.records);coverage=@($registry.coverage)+@($winget.coverage)+@($vscode.coverage)+@($node.coverage)} | ConvertTo-Json -Depth 8 -Compress
 }
 if($MyInvocation.InvocationName -ne '.') { Invoke-WindowsInventory }
