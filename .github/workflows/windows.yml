@@ -1,0 +1,57 @@
+name: Windows M1
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: TypeScript and production renderer
+        run: npm run build
+      - name: UI regression tests (synthetic IPC fixtures)
+        run: npm test
+      - name: SQLite schema regression tests
+        run: npm run test:schema
+      - name: PowerShell adapter regression tests
+        shell: powershell
+        run: ./scripts/test-adapter.ps1
+      - name: Reject inherited PowerShell module hijacking
+        run: node scripts/test-module-path.mjs
+      - name: Rust unit tests and migrations
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
+      - name: Rust static analysis
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Windows Tauri build
+        run: npm run tauri -- build --no-bundle -- --locked
+      - name: Build real inventory integration probe
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin inventory_probe
+      - name: Build instrumented real WebView acceptance executable
+        run: |
+          Copy-Item src-tauri/target/release/safepatch.exe src-tauri/target/release/safepatch-production.exe
+          cargo build --locked --manifest-path src-tauri/Cargo.toml --release --features acceptance --bin safepatch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item src-tauri/target/release/safepatch.exe src-tauri/target/release/safepatch-acceptance.exe
+          Copy-Item src-tauri/target/release/safepatch-production.exe src-tauri/target/release/safepatch.exe
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-m1-build
+          if-no-files-found: warn
+          path: |
+            src-tauri/Cargo.lock
+            src-tauri/target/release/safepatch.exe
+            src-tauri/target/release/safepatch-production.exe
+            src-tauri/target/release/safepatch-acceptance.exe
+            src-tauri/target/debug/inventory_probe.exe
+          retention-days: 7
