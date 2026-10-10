@@ -15,7 +15,7 @@ fn digits(value:&str)->&str{&value[value.bytes().take_while(u8::is_ascii_digit).
 fn separator(value:&str)->&str{if value.as_bytes().first().is_some_and(|c|matches!(c,b'.'|b'_'|b'-')){&value[1..]}else{value}}
 fn suffix<'a>(value:&'a str,tags:&[&str])->Option<&'a str>{
     let candidate=separator(value);
-    tags.iter().find_map(|tag|candidate.strip_prefix(tag).map(|rest|digits(separator(rest))))
+    tags.iter().find_map(|tag|candidate.strip_prefix(*tag).map(|rest|digits(separator(rest))))
 }
 /// PEP 440 syntax only. Preserves the exact declaration, without range matching.
 pub fn exact_version(value:&str)->bool {
