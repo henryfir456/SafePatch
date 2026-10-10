@@ -20,6 +20,11 @@ $mismatch=Convert-NodeFileMetadata $metadata ('b'*64) 'unknown' 'path'
 Assert ($null -eq $mismatch.normalized_id -and $null -eq $mismatch.installed_version) 'node.exe name alone cannot establish runtime identity'
 $missing=Convert-NodeFileMetadata $null ('c'*64) 'machine' 'default'
 Assert ($null -eq $missing.installed_version) 'missing resource metadata remains UNKNOWN'
+$discovered=@(Get-NodeMetadataRoots)
+$fnmDefault=[IO.Path]::Combine([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData),'fnm/node-versions')
+$fnmLegacy=[IO.Path]::Combine([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile),'.fnm/node-versions')
+Assert (@($discovered | Where-Object {$_.hint -eq 'fnm' -and $_.path -eq $fnmDefault}).Count -gt 0) 'fnm Windows default uses roaming application data'
+Assert (@($discovered | Where-Object {$_.hint -eq 'fnm' -and $_.path -eq $fnmLegacy}).Count -gt 0) 'legacy fnm home directory remains discoverable'
 $schedule=[pscustomobject]@{checked_at='2026-10-10';releases=@{
     v24=@{start='2025-05-06';lts='2025-10-28';maintenance='2026-10-20';end='2028-04-30'}
     v22=@{start='2024-04-24';lts='2024-10-29';maintenance='2025-10-21';end='2027-04-30'}
@@ -81,4 +86,4 @@ try{
     $resolved=[IO.Path]::GetFullPath($testRoot)
     if($resolved.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase) -and [IO.Directory]::Exists($resolved)){Remove-Item -LiteralPath $resolved -Recurse -Force}
 }
-Write-Output 'Node metadata assertions: PASS (27). Authored metadata/files; not device acceptance.'
+Write-Output 'Node metadata assertions: PASS (29). Authored metadata/files; not device acceptance.'

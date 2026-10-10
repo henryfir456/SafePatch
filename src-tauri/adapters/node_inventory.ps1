@@ -60,7 +60,8 @@ function Get-NodeMetadataRoots {
     [pscustomobject]@{path=[IO.Path]::Combine($local,'Programs/nodejs');layout='direct';scope='user';hint='default'}
     foreach($root in @(
         [pscustomobject]@{path=[IO.Path]::Combine($roaming,'nvm');layout='versions';scope='user';hint='nvm'},
-        [pscustomobject]@{path=[IO.Path]::Combine($local,'fnm/node-versions');layout='fnm';scope='user';hint='fnm'},
+        [pscustomobject]@{path=[IO.Path]::Combine($roaming,'fnm/node-versions');layout='fnm';scope='user';hint='fnm'},
+        [pscustomobject]@{path=[IO.Path]::Combine([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile),'.fnm/node-versions');layout='fnm';scope='user';hint='fnm'},
         [pscustomobject]@{path=[IO.Path]::Combine($local,'Volta/tools/image/node');layout='versions';scope='user';hint='volta'},
         [pscustomobject]@{path=[IO.Path]::Combine($local,'nvs/node');layout='nvs';scope='user';hint='nvs'})){$root}
     foreach($manager in @(@('NVM_HOME','nvm','versions'),@('FNM_DIR','fnm','fnm'),@('VOLTA_HOME','volta','volta'),@('NVS_HOME','nvs','nvs'))){
