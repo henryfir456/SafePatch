@@ -10,9 +10,14 @@ function Read-PreviewMsiRows($Database,[string]$Sql) {
  try {
   $null=$view.Execute()
   while($record=$view.Fetch()){
-   $row=@()
-   for($i=1;$i -le $record.FieldCount;$i++){$row+=$record.StringData($i)}
-   $result+=[pscustomobject]@{Fields=@($row)}
+   $isCom=[Runtime.InteropServices.Marshal]::IsComObject($record)
+   try {
+    $count=if($isCom){[int]$record.GetType().InvokeMember('FieldCount',[Reflection.BindingFlags]::GetProperty,$null,$record,$null)}else{[int]$record.FieldCount}
+    if($count -lt 1){throw 'PREVIEW_MSI_INVALID_FIELD_COUNT'}
+    $row=@()
+    for($i=1;$i -le $count;$i++){$row+=$record.StringData($i)}
+    $result+=[pscustomobject]@{Fields=@($row)}
+   } finally {if($isCom){$null=[Runtime.InteropServices.Marshal]::ReleaseComObject($record)}}
   }
  } finally {$null=$view.Close()}
  return ,$result

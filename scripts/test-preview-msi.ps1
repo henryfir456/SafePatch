@@ -21,5 +21,9 @@ $null=$view.Close();$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObje
 $rows=Read-PreviewMsiRows $reader 'SELECT Condition FROM LaunchCondition'
 Write-Output ('PREVIEW_MSI_FIXTURE_ROWS='+($rows|ConvertTo-Json -Depth 5 -Compress))
 if($rows.Count -ne 1 -or $rows[0].Fields[0] -ne 'NOT ALLUSERS'){throw 'PREVIEW_MSI_REAL_TABLE_READ_REGRESSION'}
+$two=Read-PreviewMsiRows $reader 'SELECT Condition, Description FROM LaunchCondition'
+if($two.Count -ne 1 -or $two[0].Fields.Count -ne 2 -or $two[0].Fields[1] -ne 'fixture'){throw 'PREVIEW_MSI_REAL_TWO_COLUMN_REGRESSION'}
+$empty=Read-PreviewMsiRows $reader "SELECT Condition FROM LaunchCondition WHERE Condition='missing'"
+if($empty.Count -ne 0){throw 'PREVIEW_MSI_REAL_EMPTY_REGRESSION'}
 $null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($reader)
-Write-Output 'Actual Windows Installer table fixture read PASS; not product/device acceptance.'
+Write-Output 'Actual Windows Installer table fixture: single/two/empty queries PASS; not product/device acceptance.'
