@@ -29,3 +29,10 @@ test('real command progress/cancel ids and terminal graph refresh are connected'
   fireEvent.click(await screen.findByRole('button',{name:'取消 npm 掃描'}));await waitFor(()=>expect(api.cancel).toHaveBeenCalledWith('npm-1'));
   expect(await screen.findByText('1.2.3')).toBeInTheDocument();expect(npmApi.graph).toHaveBeenCalledWith('npm-1');expect(api.status).toHaveBeenCalledWith('npm-1');
 });
+test('large declaration list pages without dropping data and poisoned text stays inert',async()=>{
+  const packages=Array.from({length:250},(_,i)=>({...graph.packages[0],id:'p'+i,name:i===201?'<img src=x onerror=alert(1)>':'package-'+i}));
+  vi.mocked(npmApi.latest).mockResolvedValue(scan);vi.mocked(npmApi.graph).mockResolvedValue({...graph,packages,edges:[]});
+  const {container}=render(<NpmInventory disabled={false} onActive={vi.fn()}/>);expect(await screen.findByText('package-0')).toBeInTheDocument();expect(screen.getAllByRole('row')).toHaveLength(201);
+  fireEvent.click(screen.getByRole('button',{name:'下一頁'}));expect(screen.getByText('package-249')).toBeInTheDocument();expect(screen.queryByText('package-0')).toBeNull();expect(screen.getAllByRole('row')).toHaveLength(51);expect(container.querySelector('img')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'上一頁'}));expect(screen.getByText('package-0')).toBeInTheDocument();
+});
