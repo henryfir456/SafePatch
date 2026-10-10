@@ -143,6 +143,11 @@ mod tests {
     #[test]fn duplicate_conflicting_version_strings_cannot_establish_one_version(){
         assert_eq!(parse_pe_metadata(&fixture(false,&[("ProductVersion","3.13.2"),("ProductVersion","3.12.0")])).err(),Some("PE_VERSION_RESOURCE_CONFLICT"));
     }
+    #[test]fn retained_resource_fields_cannot_transport_private_paths_urls_or_credentials(){
+        for key in ["ProductVersion","FileVersion","ProductName","CompanyName"]{for value in [r"C:\private\secret", "https://user:secret@private.invalid/x"]{
+            let p=parse_pe_metadata(&fixture(false,&[(key,value)])).unwrap();let text=serde_json::to_string(&p).unwrap();assert!(!text.contains("secret")&&!text.contains("private"),"field {key}");
+        }}
+    }
     #[test]fn malformed_offsets_truncation_and_absence_have_stable_errors(){
         let valid=fixture(false,&[("ProductVersion","3.13.2")]);for end in [0,2,60,128,152,200,512,valid.len()-1]{assert!(parse_pe_metadata(&valid[..end]).is_err());}
         let mut poisoned=valid.clone();poisoned[60..64].copy_from_slice(&u32::MAX.to_le_bytes());assert!(parse_pe_metadata(&poisoned).is_err());

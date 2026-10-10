@@ -40,17 +40,24 @@ mod local {
         if !child.path.to_string_lossy().to_ascii_lowercase().starts_with(&prefix){return Err("PYTHON_METADATA_UNSAFE")}
         Ok(child)
     }
-    fn marker(path:&Path)->bool{fs::symlink_metadata(path).is_ok()}
+    fn marker(root:&Root,name:&str)->Result<bool,&'static str>{
+        if name.is_empty()||name.contains(['\\','/',':'])||name=="."||name==".."||name.chars().any(char::is_control){return Err("PYTHON_METADATA_UNSAFE")}
+        root.unchanged().map_err(error)?;Ok(fs::symlink_metadata(root.path.join(name)).is_ok())
+    }
     fn runtime_version(value:&str)->bool{
         let release=value.split(|c:char|!c.is_ascii_digit()&&c!='.').next().unwrap_or("").trim_end_matches('.');
         release.split('.').count()==3&&exact_version(value)&&!value.contains(['!','+'])
     }
     pub fn collect(path:&Path,cancel:&AtomicBool)->Result<PythonSnapshot,&'static str>{
         cancelled(cancel)?;let root=Root::open(path).map_err(error)?;
-        let venv=marker(&root.path.join("pyvenv.cfg"));let root_exe=marker(&root.path.join("python.exe"));let script_exe=marker(&root.path.join("Scripts/python.exe"));
+        let venv=marker(&root,"pyvenv.cfg")?;let root_exe=marker(&root,"python.exe")?;
+        let scripts=if marker(&root,"Scripts")?{Some(child(&root,&root.path.join("Scripts")))}else{None};
+        let script_exe=match scripts.as_ref(){Some(Ok(scripts))=>marker(scripts,"python.exe")?,_=>false};
+        if !venv&&!root_exe{if let Some(Err(code))=scripts.as_ref(){return Err(code)}}
         if !venv&&!root_exe&&!script_exe{return Err("PYTHON_ENVIRONMENT_NOT_RECOGNIZED")}
         let root_path_hash=hash(&root.path.to_string_lossy().to_ascii_lowercase());let environment_id=hash(&format!("python-environment:{root_path_hash}"));
         let mut snapshot=PythonSnapshot{environment_id,root_path_hash,observed_at:chrono::Utc::now().to_rfc3339(),environment_kind:if venv{"VENV_METADATA"}else{"INTERPRETER_DIRECTORY_METADATA"}.into(),venv_metadata:None,interpreters:Vec::new(),packages:Vec::new(),codes:vec!["PTH_EDITABLE_USER_AND_EXTRA_PATHS_NOT_SCANNED".into(),"LEGACY_EGG_INFO_AND_IMPORT_PATHS_NOT_SCANNED".into(),"INSTALLED_METADATA_NOT_CONTENT_PROOF".into()]};
+        if let Some(Err(code))=scripts.as_ref(){snapshot.codes.push((*code).into())}
         if venv {
             match read(&root,"pyvenv.cfg",65536,cancel).and_then(|b|b.ok_or("PYTHON_VENV_CONFIG_UNREADABLE")).and_then(|b|parse_venv_config(&b)){
                 Ok(config)=>{snapshot.codes.extend(config.codes.clone());snapshot.venv_metadata=Some(config)},
@@ -72,8 +79,12 @@ mod local {
             snapshot.interpreters.push(interpreter);
         }
         if snapshot.interpreters.is_empty(){snapshot.codes.push("PYTHON_INTERPRETER_NOT_FOUND".into())}
-        let site_path=root.path.join("Lib/site-packages");
-        let site=if marker(&site_path){match child(&root,&site_path){Ok(site)=>Some(site),Err(code)=>{snapshot.codes.push(code.into());None}}}else{snapshot.codes.push("PYTHON_SITE_PACKAGES_NOT_FOUND".into());None};
+        let site=if marker(&root,"Lib")?{
+            match child(&root,&root.path.join("Lib")){
+                Ok(lib)=>if marker(&lib,"site-packages")?{match child(&root,&lib.path.join("site-packages")){Ok(site)=>Some(site),Err(code)=>{snapshot.codes.push(code.into());None}}}else{snapshot.codes.push("PYTHON_SITE_PACKAGES_NOT_FOUND".into());None},
+                Err(code)=>{snapshot.codes.push(code.into());None},
+            }
+        }else{snapshot.codes.push("PYTHON_SITE_PACKAGES_NOT_FOUND".into());None};
         if let Some(site)=site {
             let entries=fs::read_dir(&site.path).map_err(|_|"PYTHON_METADATA_UNREADABLE")?;let mut total=0usize;let mut names=BTreeMap::new();
             for (index,entry) in entries.enumerate(){
@@ -93,6 +104,10 @@ mod local {
             if names.values().any(|count|*count>1){snapshot.codes.push("POTENTIAL_DUPLICATE_DISTRIBUTION_METADATA".into())}
         }
         root.unchanged().map_err(error)?;cancelled(cancel)?;snapshot.packages.sort_by(|a,b|a.name.cmp(&b.name).then(a.id.cmp(&b.id)));snapshot.codes.sort();snapshot.codes.dedup();Ok(snapshot)
+    }
+    #[cfg(test)]mod marker_contracts{
+        use super::*;
+        #[test]fn markers_cannot_query_through_unverified_descendant_paths(){let t=tempfile::tempdir().unwrap();let root=Root::open(t.path()).unwrap();for name in ["Scripts/python.exe","Lib\\site-packages","..","C:\\outside"]{assert_eq!(marker(&root,name).err(),Some("PYTHON_METADATA_UNSAFE"));}assert!(!marker(&root,"python.exe").unwrap());}
     }
 }
 #[cfg(windows)]
