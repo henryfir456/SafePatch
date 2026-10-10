@@ -7,6 +7,7 @@
   try{
     const mode=await invoke('acceptance_mode');let cancellation=false;
     if(mode==='npm-scan'){
+      await wait(()=>document.querySelector('[aria-label="npm project directory"]'));
       const input=document.querySelector('[aria-label="npm project directory"]');const root=await invoke('acceptance_project_root');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,root);input.dispatchEvent(new Event('input',{bubbles:true}));
       await wait(()=>start()&&!start().disabled);start().click();await wait(()=>button('取消 npm 掃描'));button('取消 npm 掃描').click();

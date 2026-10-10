@@ -7,13 +7,16 @@ pub const MAX_LOCK_BYTES:usize=8*1024*1024;
 const MAX_PACKAGES:usize=20000;
 const MAX_EDGES:usize=50000;
 #[derive(Clone,Debug,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DependencyPackage {
     pub id:String,pub name:String,pub version:Option<String>,pub direct_status:String,
     pub source:String,pub slot_hash:String,
 }
 #[derive(Clone,Debug,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DependencyEdge {pub from_id:String,pub to_id:String,pub kinds:Vec<String>}
 #[derive(Clone,Debug,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DependencyGraph {
     pub environment_id:String,pub lockfile_version:u8,pub lockfile_hash:String,
     pub lockfile_kind:String,pub root_path_hash:String,pub observed_at:String,
