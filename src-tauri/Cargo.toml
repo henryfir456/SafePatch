@@ -10,7 +10,7 @@ name = "safepatch_lib"
 [features]
 default = ["desktop"]
 desktop = ["dep:tauri", "dep:tauri-build"]
-acceptance = ["desktop"]
+acceptance = ["desktop", "tauri/custom-protocol"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }

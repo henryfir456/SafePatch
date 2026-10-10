@@ -12,8 +12,14 @@ fn main()->Result<(),Box<dyn std::error::Error>>{
         if s.status!="RUNNING"{
             let assets=service.assets(&s.id)?;
             drop(service);
-            std::thread::sleep(Duration::from_millis(100));
-            let recreated=ScanService::new(dir.path().join("inventory.sqlite"))?;
+            let restart_started=Instant::now();
+            let recreated=loop{
+                match ScanService::new(dir.path().join("inventory.sqlite")){
+                    Ok(service)=>break service,
+                    Err(code) if code=="DATABASE_IN_USE" && restart_started.elapsed()<Duration::from_secs(3)=>std::thread::sleep(Duration::from_millis(20)),
+                    Err(code)=>return Err(code.into()),
+                }
+            };
             let persisted=recreated.assets(&s.id)?;
             let preserved=serde_json::to_value(&assets)?==serde_json::to_value(&persisted)?;
             println!("{}",serde_json::to_string_pretty(&serde_json::json!({"status":s.status,"coverage":s.coverage,"error_code":s.error_code,"asset_count":assets.len(),"versioned_count":assets.iter().filter(|a|a.installed_version.is_some()).count(),"publisher_count":assets.iter().filter(|a|a.publisher.is_some()).count(),"duplicate_candidates":assets.iter().filter(|a|a.duplicate_group.is_some()).count(),"restart_preserved":preserved,"elapsed_seconds":started.elapsed().as_secs(),"verification":"REAL_RUST_ADAPTER_SQLITE; DESKTOP_UI_NOT_VERIFIED"}))?);
