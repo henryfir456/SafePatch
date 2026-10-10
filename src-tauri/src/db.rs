@@ -35,9 +35,11 @@ fn finish_inner(db:&mut Connection,scan:&Scan,assets:&[Asset],graph:Option<&crat
     if let Some(g)=graph{
         tx.execute("INSERT INTO environments VALUES (?1,'npm',?2,?3,?4) ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",params![g.environment_id,format!("npm-project {}",&g.root_path_hash[..12]),g.root_path_hash,g.observed_at]).map_err(|_|"DATABASE_ENVIRONMENT_FAILED")?;
         for p in &g.packages{
-            tx.execute("INSERT INTO packages(id,environment_id,ecosystem,name,version,direct,source,observed_at,direct_status,slot_hash) VALUES (?1,?2,'npm',?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(id) DO UPDATE SET version=excluded.version,direct=excluded.direct,source=excluded.source,observed_at=excluded.observed_at,direct_status=excluded.direct_status",params![p.id,g.environment_id,p.name,p.version,p.direct_status=="DIRECT",p.source,g.observed_at,p.direct_status,p.slot_hash]).map_err(|_|"DATABASE_PACKAGE_FAILED")?;
+            tx.execute("INSERT INTO packages(id,environment_id,ecosystem,name,version,direct,source,observed_at,direct_status,slot_hash) VALUES (?1,?2,'npm',?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(id) DO UPDATE SET name=excluded.name,version=excluded.version,direct=excluded.direct,source=excluded.source,observed_at=excluded.observed_at,direct_status=excluded.direct_status,slot_hash=excluded.slot_hash",params![p.id,g.environment_id,p.name,p.version,p.direct_status=="DIRECT",p.source,g.observed_at,p.direct_status,p.slot_hash]).map_err(|_|"DATABASE_PACKAGE_FAILED")?;
         }
         tx.execute("DELETE FROM dependency_edges WHERE environment_id=?1",[&g.environment_id]).map_err(|_|"DATABASE_GRAPH_FAILED")?;
+        tx.execute("DELETE FROM environment_current_packages WHERE environment_id=?1",[&g.environment_id]).map_err(|_|"DATABASE_GRAPH_FAILED")?;
+        for p in &g.packages{tx.execute("INSERT INTO environment_current_packages VALUES (?1,?2)",params![g.environment_id,p.id]).map_err(|_|"DATABASE_GRAPH_FAILED")?;}
         for e in &g.edges{
             tx.execute("INSERT INTO dependency_edges(id,from_package_id,to_package_id,environment_id,kinds_json) VALUES (?1,?2,?3,?4,?5)",params![crate::model::hash(&format!("{}:{}:{}",g.environment_id,e.from_id,e.to_id)),e.from_id,e.to_id,g.environment_id,serde_json::to_string(&e.kinds).map_err(|_|"SERIALIZATION_FAILED")?]).map_err(|_|"DATABASE_GRAPH_FAILED")?;
         }
@@ -90,5 +92,18 @@ pub fn assets(db:&Connection,id:&str)->Result<Vec<Asset>,String>{
         let d=open(&path).unwrap();assert_eq!(serde_json::to_string(&project_graph(&d,"npm0").unwrap().unwrap()).unwrap(),initial);
         assert_eq!(project_graph(&d,"npm1").unwrap().unwrap().packages[0].version.as_deref(),Some("2.0.0"));
         assert!(scan(&d,None).unwrap().is_none());assert!(scan_in_scope(&d,None,"npm").unwrap().is_some());
+    }
+    #[test]fn current_membership_and_alias_identity_change_without_rewriting_history(){
+        let mut d=Connection::open_in_memory().unwrap();d.execute_batch("PRAGMA foreign_keys=ON").unwrap();migrate(&mut d).unwrap();
+        let parse=|bytes:&[u8]|crate::npm::parse_lock(bytes,&"e".repeat(64),None,&std::sync::atomic::AtomicBool::new(false)).unwrap();
+        let first=parse(br#"{"lockfileVersion":3,"packages":{"node_modules/alias":{"name":"first","version":"1.0.0"},"node_modules/removed":{"version":"3.0.0"}}}"#);
+        let second=parse(br#"{"lockfileVersion":3,"packages":{"node_modules/alias":{"name":"second","version":"2.0.0"}}}"#);
+        let empty=parse(br#"{"lockfileVersion":3,"packages":{}}"#);
+        for (i,graph) in [&first,&second,&empty].into_iter().enumerate(){let scan=Scan{id:format!("p{i}"),status:"PARTIAL".into(),phase:"finished".into(),progress:100,started_at:i.to_string(),finished_at:Some(i.to_string()),coverage:vec![],error_code:None};insert_scoped_scan(&d,&scan,"npm").unwrap();finish_project(&mut d,&scan,Some(graph)).unwrap();
+            assert_eq!(d.query_row("SELECT count(*) FROM environment_current_packages",[],|r|r.get::<_,usize>(0)).unwrap(),graph.packages.len());
+            if i==1{assert_eq!(d.query_row("SELECT name FROM packages JOIN environment_current_packages ON package_id=packages.id",[],|r|r.get::<_,String>(0)).unwrap(),"second");}
+        }
+        assert_eq!(serde_json::to_string(&project_graph(&d,"p0").unwrap().unwrap()).unwrap(),serde_json::to_string(&first).unwrap());
+        assert_eq!(d.query_row("SELECT count(*) FROM packages",[],|r|r.get::<_,usize>(0)).unwrap(),2);
     }
 }
