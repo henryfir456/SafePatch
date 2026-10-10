@@ -56,6 +56,7 @@ impl ScanService {
     }
     fn complete_project(&self,result:Result<npm::DependencyGraph,String>,cancelled:bool){
         if let Ok(mut guard)=self.active.lock(){if let Some(active)=guard.as_mut(){
+            let cancelled=cancelled||active.cancel.load(Ordering::Relaxed);
             let graph=match result{
                 Ok(graph) if !cancelled=>{active.scan.status="PARTIAL".into();active.scan.coverage=vec![model::Coverage{scanner:"npm-lockfile".into(),status:"PARTIAL".into(),count:graph.packages.len(),codes:graph.codes.clone()}];Some(graph)},
                 Ok(_)=>{active.scan.status="CANCELLED".into();None},
@@ -65,8 +66,36 @@ impl ScanService {
             if let Err(code)=db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED".to_string()).and_then(|mut db|db::finish_project(&mut db,&active.scan,graph.as_ref())){active.scan.status="FAILED".into();active.scan.error_code=Some(code);}
         }}
     }
+    pub fn start_python(self:&Arc<Self>,root:String)->Result<Scan,String>{
+        if root.is_empty()||root.len()>4096||root.chars().any(char::is_control){return Err("PYTHON_ROOT_INVALID".into())}
+        let mut active=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?;
+        if active.as_ref().is_some_and(|a|a.scan.status=="RUNNING"){return Err("SCAN_ALREADY_RUNNING".into())}
+        let scan=Scan{id:uuid::Uuid::new_v4().to_string(),status:"RUNNING".into(),phase:"reading selected Python environment metadata".into(),progress:10,started_at:chrono::Utc::now().to_rfc3339(),finished_at:None,coverage:vec![],error_code:None};
+        db::insert_scoped_scan(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,&scan,"python").map_err(|_|"DATABASE_START_FAILED")?;
+        let cancel=Arc::new(AtomicBool::new(false));*active=Some(Active{scan:scan.clone(),cancel:cancel.clone(),scope:"python".into()});
+        let service=self.clone();
+        let spawned=std::thread::Builder::new().name("safepatch-python".into()).spawn(move||{
+            let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||python_helper::collect(std::path::Path::new(&root),cancel.clone()))).unwrap_or_else(|_|Err("PYTHON_WORKER_FAILED".into()));
+            service.complete_python(result,cancel.load(Ordering::Relaxed));
+        });
+        if spawned.is_err(){drop(active);self.complete_python(Err("PYTHON_WORKER_FAILED".into()),false);return Err("PYTHON_WORKER_FAILED".into())}
+        Ok(scan)
+    }
+    fn complete_python(&self,result:Result<python::PythonSnapshot,String>,cancelled:bool){
+        if let Ok(mut guard)=self.active.lock(){if let Some(active)=guard.as_mut(){
+            let cancelled=cancelled||active.cancel.load(Ordering::Relaxed);
+            let snapshot=match result{
+                Ok(snapshot) if !cancelled=>{active.scan.status="PARTIAL".into();active.scan.coverage=vec![model::Coverage{scanner:"python-dist-info".into(),status:"PARTIAL".into(),count:snapshot.packages.len(),codes:snapshot.codes.clone()}];Some(snapshot)},
+                Ok(_)=>{active.scan.status="CANCELLED".into();None},
+                Err(code)=>{active.scan.status=if cancelled||code=="CANCELLED"{"CANCELLED"}else{"FAILED"}.into();active.scan.error_code=Some(code);None}
+            };
+            active.scan.finished_at=Some(chrono::Utc::now().to_rfc3339());active.scan.phase="finished".into();active.scan.progress=100;
+            if let Err(code)=db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED".to_string()).and_then(|mut db|db::finish_python(&mut db,&active.scan,snapshot.as_ref())){active.scan.status="FAILED".into();active.scan.error_code=Some(code);}
+        }}
+    }
     fn complete(&self,result:Result<(Vec<Asset>,Vec<model::Coverage>),String>,cancelled:bool){
         if let Ok(mut guard)=self.active.lock(){if let Some(active)=guard.as_mut(){
+            let cancelled=cancelled||active.cancel.load(Ordering::Relaxed);
             active.scan.phase="saving local results".into();active.scan.progress=90;
             let assets=match result{Ok((assets,coverage))=>{active.scan.coverage=coverage;active.scan.status=if cancelled{"CANCELLED"}else if active.scan.coverage.iter().all(|c|c.status=="COMPLETE"){"COMPLETE"}else{"PARTIAL"}.into();assets},Err(code)=>{active.scan.status=if cancelled{"CANCELLED"}else{"FAILED"}.into();active.scan.error_code=Some(code);vec![]}};
             active.scan.finished_at=Some(chrono::Utc::now().to_rfc3339());active.scan.phase="finished".into();active.scan.progress=100;
@@ -82,11 +111,26 @@ impl ScanService {
     pub fn latest_project(&self)->Result<Option<Scan>,String>{self.latest_scope("npm")}
     fn latest_scope(&self,scope:&str)->Result<Option<Scan>,String>{if let Some(a)=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?.as_ref(){if a.scope==scope{return Ok(Some(a.scan.clone()))}}db::scan_in_scope(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,None,scope)}
     pub fn project_graph(&self,id:&str)->Result<Option<npm::DependencyGraph>,String>{Self::validate_id(id)?;db::project_graph(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,id)}
+    pub fn latest_python(&self)->Result<Option<Scan>,String>{self.latest_scope("python")}
+    pub fn python_snapshot(&self,id:&str)->Result<Option<python::PythonSnapshot>,String>{Self::validate_id(id)?;db::python_snapshot(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,id)}
     pub fn assets(&self,id:&str)->Result<Vec<Asset>,String>{Self::validate_id(id)?;db::assets(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,id)}
 }
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn acknowledged_python_cancel_wins_over_stale_worker_flag_and_preserves_current_membership(){
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("db.sqlite");let service=ScanService::new(path.clone()).unwrap();let snapshot=python::fixture_snapshot();
+        let previous=Scan{id:uuid::Uuid::new_v4().to_string(),status:"PARTIAL".into(),phase:"finished".into(),progress:100,started_at:chrono::Utc::now().to_rfc3339(),finished_at:Some(chrono::Utc::now().to_rfc3339()),coverage:vec![],error_code:None};
+        {let mut d=db::open(&path).unwrap();db::insert_scoped_scan(&d,&previous,"python").unwrap();db::finish_python(&mut d,&previous,Some(&snapshot)).unwrap();}
+        let scan=Scan{id:uuid::Uuid::new_v4().to_string(),status:"RUNNING".into(),phase:"reading".into(),progress:10,started_at:chrono::Utc::now().to_rfc3339(),finished_at:None,coverage:vec![],error_code:None};db::insert_scoped_scan(&db::open(&path).unwrap(),&scan,"python").unwrap();
+        *service.active.lock().unwrap()=Some(Active{scan:scan.clone(),cancel:Arc::new(AtomicBool::new(false)),scope:"python".into()});let stale_flag=false;service.cancel(&scan.id).unwrap();let mut empty=snapshot.clone();empty.packages.clear();service.complete_python(Ok(empty),stale_flag);
+        assert_eq!(service.status(&scan.id).unwrap().status,"CANCELLED");assert!(service.python_snapshot(&scan.id).unwrap().is_none());let d=db::open(&path).unwrap();assert_eq!(d.query_row("SELECT count(*) FROM environment_current_packages WHERE environment_id=?1",[&snapshot.environment_id],|r|r.get::<_,usize>(0)).unwrap(),1);
+    }
     #[test]fn ipc_scope_and_ids_are_validated(){let dir=tempfile::tempdir().unwrap();let s=ScanService::new(dir.path().join("db.sqlite")).unwrap();assert_eq!(s.start("C:\\private; execute").err().unwrap(),"UNSUPPORTED_SCOPE");assert_eq!(s.status("../../../secret").err().unwrap(),"INVALID_SCAN_ID");assert!(s.latest().unwrap().is_none());}
     #[cfg(windows)]
     #[test]fn second_instance_cannot_interrupt_live_database(){let dir=tempfile::tempdir().unwrap();let path=dir.path().join("db.sqlite");let owner=ScanService::new(path.clone()).unwrap();assert_eq!(ScanService::new(path.clone()).err().unwrap(),"DATABASE_IN_USE");drop(owner);assert!(ScanService::new(path).is_ok());}
 }
+pub mod python_metadata;
+pub mod pe_metadata;
+pub mod python;
+
+pub mod python_helper;

@@ -3,6 +3,7 @@ import { vi, test, expect, beforeEach } from 'vitest';
 import { api, Asset, Scan } from './api';
 import { App } from './App';
 vi.mock('./api',()=>({api:{latest:vi.fn(),assets:vi.fn(),start:vi.fn(),cancel:vi.fn(),status:vi.fn()}}));
+vi.mock('./pythonApi',()=>({pythonApi:{latest:()=>Promise.resolve(null),snapshot:()=>Promise.resolve(null),start:vi.fn()}}));
 vi.mock('./npmApi',()=>({npmApi:{latest:()=>Promise.resolve(null),graph:()=>Promise.resolve(null),start:vi.fn()}}));
 const scan:Scan={id:'s1',status:'PARTIAL',phase:'finished',progress:100,started_at:'2026-10-10T00:00:00Z',finished_at:null,coverage:[{scanner:'winget',status:'UNKNOWN',count:0,codes:['WINGET_UNAVAILABLE']}],error_code:null};
 const asset:Asset={id:'a1',display_name:'<img src=x onerror=alert(1)>',publisher:'Vendor',installed_version:'1.2.3',normalized_id:null,installation_source:'UNKNOWN',identity_confidence:'UNKNOWN',duplicate_group:null,install_path_hash:null,observed_at:scan.started_at,provenance:[{scanner:'registry',source_id:'hashed',scope:'user',view:'64',catalog_source:null}]};

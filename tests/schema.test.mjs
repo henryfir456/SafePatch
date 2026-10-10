@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 const migration=readFileSync(new URL('../src-tauri/migrations/001_initial.sql',import.meta.url),'utf8');
 const projectMigration=readFileSync(new URL('../src-tauri/migrations/002_project_graphs.sql',import.meta.url),'utf8');
 const membershipMigration=readFileSync(new URL('../src-tauri/migrations/003_current_membership.sql',import.meta.url),'utf8');
+const pythonMigration=readFileSync(new URL('../src-tauri/migrations/004_python_snapshots.sql',import.meta.url),'utf8');
 function db(){const d=new DatabaseSync(':memory:');d.exec('PRAGMA foreign_keys=ON; BEGIN');d.exec(migration);d.exec('PRAGMA user_version=1; COMMIT');return d;}
 test('initial schema covers architecture and foreign keys',()=>{const d=db();assert.equal(d.prepare('PRAGMA user_version').get().user_version,1);assert.equal(d.prepare('PRAGMA foreign_keys').get().foreign_keys,1);assert.equal(d.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get().n,10);assert.throws(()=>d.prepare("INSERT INTO scan_assets VALUES ('missing','missing','{}')").run(),/FOREIGN KEY/);d.close();});
 test('uncertainty and mutually exclusive finding target are enforced',()=>{const d=db();d.exec("INSERT INTO assets VALUES ('a','windows','Example',NULL,NULL,'UNKNOWN','1',NULL,'UNKNOWN','[]','now')");const q=d.prepare('INSERT INTO findings VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)');q.run('f','a',null,'UNKNOWN','UNKNOWN','REVIEW','{}','now');assert.throws(()=>q.run('x','a',null,'SAFE','HIGH','P0','{}','now'),/CHECK/);assert.throws(()=>q.run('y',null,null,'UNKNOWN','UNKNOWN','REVIEW','{}','now'),/CHECK/);assert.throws(()=>q.run('z','a',null,'UNKNOWN','UNKNOWN','REVIEW','not json','now'),/CHECK/);d.close();});
@@ -26,4 +27,9 @@ test('preview v2 upgrade reconstructs latest membership and alias identity witho
     assert.equal(d.prepare("SELECT snapshot_json FROM scan_project_graphs WHERE scan_run_id='s0'").get().snapshot_json,snapshots[0]);
     assert.throws(()=>d.exec("INSERT INTO environment_current_packages VALUES ('e','missing')"),/FOREIGN KEY/);d.close();
   }
+});
+test('Python scope upgrade preserves historical parent references and validates FKs',()=>{
+  const d=db();d.exec(projectMigration);d.exec(membershipMigration);d.exec("PRAGMA user_version=3; INSERT INTO scan_runs(id,started_at,status,scanner_versions,coverage_json) VALUES ('old','now','COMPLETE','1','[]'); INSERT INTO assets VALUES ('a','windows','Owned fixture',NULL,NULL,'UNKNOWN','1',NULL,'UNKNOWN','[]','now'); INSERT INTO scan_assets VALUES ('old','a','{}');");
+  d.exec('PRAGMA foreign_keys=OFF; BEGIN');d.exec(pythonMigration);assert.deepEqual(d.prepare('PRAGMA foreign_key_check').all(),[]);d.exec('PRAGMA user_version=4; COMMIT; PRAGMA foreign_keys=ON');assert.equal(d.prepare('SELECT count(*) n FROM scan_assets').get().n,1);assert.equal(d.prepare('PRAGMA foreign_keys').get().foreign_keys,1);
+  d.exec("INSERT INTO scan_runs(id,started_at,status,scanner_versions,coverage_json,scope) VALUES ('python','now','PARTIAL','1','[]','python'); INSERT INTO environments VALUES ('e','python','hashed',NULL,'now'); INSERT INTO scan_python_snapshots VALUES ('python','e','{}');");assert.throws(()=>d.exec("INSERT INTO scan_python_snapshots VALUES ('missing','e','{}')"),/FOREIGN KEY/);assert.throws(()=>d.exec("UPDATE scan_runs SET scope='untrusted'"),/CHECK/);assert.deepEqual(d.prepare('PRAGMA foreign_key_check').all(),[]);d.close();
 });
