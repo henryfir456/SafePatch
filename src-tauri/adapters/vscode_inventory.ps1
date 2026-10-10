@@ -15,3 +15,119 @@ function Convert-VSCodeExtensionManifest($Manifest,[string]$LocationHash,[string
         source_id=(Get-PathHash ($LocationHash+'\'+$ProfileRef));scope=$Scope;view='metadata';catalog_source='manifest-unverified';profile_ref=$ProfileRef
     }
 }
+function Test-LocalMetadataPath([string]$Path) {
+    # Walk from root to leaf so a junction is rejected before traversing children.
+    try {
+        if($Path -notmatch '\A[A-Za-z]:[\\/]'){return $false}
+        $full=[IO.Path]::GetFullPath($Path);$root=[IO.Path]::GetPathRoot($full)
+        if(([IO.DriveInfo]::new($root)).DriveType -eq [IO.DriveType]::Network){return $false}
+        $current=$root
+        foreach($part in $full.Substring($root.Length).Split('\')) {
+            if($part.Length -eq 0){continue}
+            if($part.Contains(':')){return $false}
+            $current=[IO.Path]::Combine($current,$part)
+            if(([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint) -ne 0){return $false}
+        }
+        return $true
+    } catch {return $false}
+}
+function Read-LocalMetadataJson([string]$Path,[string]$Kind='object') {
+    if(-not (Test-LocalMetadataPath $Path)){throw 'METADATA_PATH_UNAVAILABLE'}
+    if(([IO.FileInfo]$Path).Length -gt 1048576){throw 'METADATA_SIZE_LIMIT'}
+    $text=[IO.File]::ReadAllText($Path).TrimStart()
+    $opening=if($Kind -eq 'array'){'['}else{'{'}
+    if(-not $text.StartsWith($opening,[StringComparison]::Ordinal)){throw 'METADATA_FORMAT_UNSUPPORTED'}
+    try {$document=$text | ConvertFrom-Json} catch {throw 'METADATA_JSON_INVALID'}
+    return ,$document
+}
+function Get-VSCodeMetadataRoots {
+    $profile=[Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+    $local=[Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+    $roaming=[Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+    $programs=[Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    foreach($channel in @('stable','insiders')) {
+        $folder=if($channel -eq 'stable'){'Microsoft VS Code'}else{'Microsoft VS Code Insiders'}
+        $dataFolder=if($channel -eq 'stable'){'Code/User'}else{'Code - Insiders/User'}
+        $store=if($channel -eq 'stable'){'.vscode/extensions'}else{'.vscode-insiders/extensions'}
+        [pscustomobject]@{extension_root=[IO.Path]::Combine($profile,$store);user_data=[IO.Path]::Combine($roaming,$dataFolder);channel=$channel;scope='user';application_roots=@(
+            [pscustomobject]@{path=[IO.Path]::Combine($local,'Programs',$folder);scope='user'},
+            [pscustomobject]@{path=[IO.Path]::Combine($programs,$folder);scope='machine'})}
+    }
+}
+function Add-VSCodeProfileIndex($Map,[string]$Path,[string]$ProfileRef) {
+    $entries=Read-LocalMetadataJson $Path 'array'
+    if(@($entries).Count -gt 5000){throw 'VSCODE_PROFILE_LIMIT'}
+    foreach($entry in @($entries)) {
+        if($null -eq $entry -or $null -eq $entry.PSObject.Properties['identifier'] -or
+            $null -eq $entry.identifier.PSObject.Properties['id'] -or $entry.identifier.id -isnot [string] -or
+            $entry.identifier.id -notmatch '\A[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\z' -or
+            $null -eq $entry.PSObject.Properties['version'] -or $entry.version -isnot [string]){throw 'VSCODE_PROFILE_INDEX_INVALID'}
+        $key=$entry.identifier.id.ToLowerInvariant()+'|'+$entry.version
+        if(-not $Map.ContainsKey($key)){$Map[$key]=[Collections.Generic.List[string]]::new()}
+        if(-not $Map[$key].Contains($ProfileRef)){$Map[$key].Add($ProfileRef)}
+    }
+}
+function Get-VSCodeInventory([object[]]$Roots=$null) {
+    if($null -eq $Roots){$Roots=@(Get-VSCodeMetadataRoots)}
+    $records=[Collections.Generic.List[object]]::new()
+    $appCodes=[Collections.Generic.HashSet[string]]::new();$extensionCodes=[Collections.Generic.HashSet[string]]::new()
+    [void]$appCodes.Add('CUSTOM_PORTABLE_INSTALLATIONS_NOT_SCANNED')
+    foreach($code in @('CUSTOM_EXTENSION_LOCATIONS_NOT_SCANNED','MANIFEST_PROVENANCE_UNVERIFIED','ACTIVATION_NOT_VERIFIED','PROFILE_INHERITANCE_UNKNOWN')){[void]$extensionCodes.Add($code)}
+    $timer=[Diagnostics.Stopwatch]::StartNew();$appCount=0;$extensionCount=0
+    foreach($rootInfo in $Roots) {
+        if(Test-Cancelled){[void]$extensionCodes.Add('CANCELLED');break}
+        $profiles=@{}
+        $defaultIndex=[IO.Path]::Combine($rootInfo.extension_root,'extensions.json')
+        if([IO.File]::Exists($defaultIndex)){try{Add-VSCodeProfileIndex $profiles $defaultIndex ($rootInfo.channel+'-default')}catch{[void]$extensionCodes.Add('VSCODE_PROFILE_INDEX_UNAVAILABLE')}}
+        $profileRoot=[IO.Path]::Combine($rootInfo.user_data,'profiles')
+        if(Test-LocalMetadataPath $profileRoot){
+            $profileCount=0
+            foreach($directory in [IO.Directory]::EnumerateDirectories($profileRoot)) {
+                if(Test-Cancelled -or $timer.Elapsed.TotalSeconds -gt 15 -or $profileCount -ge 100){[void]$extensionCodes.Add('VSCODE_PROFILE_LIMIT');break}
+                $profileCount++;$basename=[IO.Path]::GetFileName($directory)
+                $profileId=if($basename -match '\A[a-fA-F0-9-]{1,64}\z'){$basename}else{'profile-'+(Get-PathHash $basename).Substring(0,16)}
+                $index=[IO.Path]::Combine($directory,'extensions.json')
+                try{Add-VSCodeProfileIndex $profiles $index ($rootInfo.channel+'-'+$profileId)}catch{[void]$extensionCodes.Add('VSCODE_PROFILE_INDEX_UNAVAILABLE')}
+            }
+        }
+        $obsolete=@{}
+        $obsoleteFile=[IO.Path]::Combine($rootInfo.extension_root,'.obsolete')
+        if([IO.File]::Exists($obsoleteFile)){try{$old=Read-LocalMetadataJson $obsoleteFile;foreach($property in $old.PSObject.Properties){if($property.Value -eq $true){$obsolete[$property.Name]=$true}}}catch{[void]$extensionCodes.Add('VSCODE_OBSOLETE_INDEX_UNAVAILABLE')}}
+        if(Test-LocalMetadataPath $rootInfo.extension_root){
+            foreach($directory in [IO.Directory]::EnumerateDirectories($rootInfo.extension_root)) {
+                if(Test-Cancelled){[void]$extensionCodes.Add('CANCELLED');break}
+                if($timer.Elapsed.TotalSeconds -gt 15 -or $extensionCount -ge 5000){[void]$extensionCodes.Add('VSCODE_METADATA_LIMIT');break}
+                if($obsolete.ContainsKey([IO.Path]::GetFileName($directory))){continue}
+                try {
+                    $manifest=Read-LocalMetadataJson ([IO.Path]::Combine($directory,'package.json'))
+                    $candidate=Convert-VSCodeExtensionManifest $manifest (Get-PathHash $directory) $rootInfo.scope 'UNKNOWN'
+                    $key=$candidate.display_name+'|'+$candidate.installed_version
+                    $references=if($profiles.ContainsKey($key)){@($profiles[$key])}else{@('UNKNOWN')}
+                    foreach($reference in $references){$record=Convert-VSCodeExtensionManifest $manifest (Get-PathHash $directory) $rootInfo.scope $reference;$records.Add($record);$extensionCount++}
+                    if($null -eq $candidate.installed_version){[void]$extensionCodes.Add('VSCODE_VERSION_UNKNOWN')}
+                }catch{[void]$extensionCodes.Add('VSCODE_EXTENSION_METADATA_UNAVAILABLE')}
+            }
+        }
+        foreach($application in @($rootInfo.application_roots)) {
+            if(Test-Cancelled){[void]$appCodes.Add('CANCELLED');break}
+            if($timer.Elapsed.TotalSeconds -gt 15){[void]$appCodes.Add('VSCODE_METADATA_LIMIT');break}
+            $applicationPath=if($application -is [string]){$application}else{$application.path}
+            $scope=if($application -is [string]){$rootInfo.scope}else{$application.scope}
+            if(-not [IO.Directory]::Exists($applicationPath)){continue}
+            try {
+                $appManifest=Read-LocalMetadataJson ([IO.Path]::Combine($applicationPath,'resources/app/package.json'))
+                $product=Read-LocalMetadataJson ([IO.Path]::Combine($applicationPath,'resources/app/product.json'))
+                if($product.applicationName -isnot [string] -or $product.applicationName -notmatch '\A[A-Za-z0-9_-]{1,128}\z'){throw 'VSCODE_PRODUCT_INVALID'}
+                $version=if($null -ne $appManifest.PSObject.Properties['version'] -and $appManifest.version -is [string] -and $appManifest.version -match '\A\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\z'){$appManifest.version}else{$null}
+                $name=Get-CleanText $product.nameShort
+                if($null -eq $name){$name='VS Code metadata'}
+                $pathHash=Get-PathHash $applicationPath
+                $records.Add([pscustomobject]@{display_name=$name;publisher=$null;installed_version=$version;normalized_id=('vscode-app:'+$product.applicationName.ToLowerInvariant());install_path_hash=$pathHash;installation_source='UNKNOWN';scanner='vscode';source_id=$pathHash;scope=$scope;view='metadata';catalog_source='manifest-unverified';profile_ref=$null})
+                $appCount++
+            }catch{[void]$appCodes.Add('VSCODE_APPLICATION_METADATA_UNAVAILABLE')}
+        }
+    }
+    return [pscustomobject]@{records=@($records);coverage=@(
+        [pscustomobject]@{scanner='vscode';status=if($appCount -gt 0){'PARTIAL'}else{'UNKNOWN'};count=$appCount;codes=@($appCodes)},
+        [pscustomobject]@{scanner='vscode-extension';status=if($extensionCount -gt 0){'PARTIAL'}else{'UNKNOWN'};count=$extensionCount;codes=@($extensionCodes)})}
+}
