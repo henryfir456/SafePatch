@@ -14,9 +14,7 @@
     <Property Id="ARPNOREPAIR" Value="1" />
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="LocalAppDataFolder">
-        <Directory Id="UserPrograms" Name="Programs">
-          <Directory Id="INSTALLDIR" Name="SafePatchPreview-MSI" />
-        </Directory>
+        <Directory Id="INSTALLDIR" Name="SafePatchPreview-MSI" />
       </Directory>
       <Directory Id="ProgramMenuFolder">
         <Directory Id="ApplicationProgramsFolder" Name="SafePatch Preview MSI" />
