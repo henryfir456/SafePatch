@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal per-user/limited Preview payload; no execution custom actions (#22). -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="{{product_name}} (MSI)" UpgradeCode="{{upgrade_code}}"
+           Language="!(loc.TauriLanguage)" Manufacturer="{{manufacturer}}" Version="{{version}}">
+    <Package Id="*" InstallerVersion="500" Compressed="yes"
+             InstallScope="perUser" InstallPrivileges="limited" SummaryCodepage="!(loc.TauriCodepage)" />
+    <Condition Message="SafePatch Preview MSI supports current-user installation only. Remove ALLUSERS.">NOT ALLUSERS</Condition>
+    <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer SafePatch Preview MSI is already installed." AllowSameVersionUpgrades="yes" />
+    <Media Id="1" Cabinet="preview.cab" EmbedCab="yes" />
+    <Icon Id="ProductIcon" SourceFile="{{icon_path}}" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="INSTALLDIR" Name="SafePatchPreview-MSI" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="SafePatch Preview MSI" />
+      </Directory>
+    </Directory>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="MainBinary" Guid="{{path_component_guid}}" Win64="yes">
+        <File Id="Path" Source="{{main_binary_path}}" Name="safepatch.exe" Checksum="yes" />
+        <RegistryValue Root="HKCU" Key="Software\{{bundle_id}}\PreviewMSI" Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
+        <RemoveFolder Id="RemoveInstallDir" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="C609F198-8B99-45EA-B03F-4722337F12F9" Win64="yes">
+        <Shortcut Id="StartMenuShortcut" Name="SafePatch Preview" Target="[INSTALLDIR]safepatch.exe" WorkingDirectory="INSTALLDIR" Icon="ProductIcon" />
+        <RegistryValue Root="HKCU" Key="Software\{{bundle_id}}\PreviewMSI" Name="Shortcut" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+    <Feature Id="Preview" Title="SafePatch Preview" Level="1" Absent="disallow">
+      <ComponentRef Id="MainBinary" /><ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Product>
+</Wix>

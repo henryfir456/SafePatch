@@ -1,6 +1,57 @@
 {
- "$schema":"https://schema.tauri.app/config/2", "productName":"SafePatch", "version":"0.1.0", "identifier":"io.github.henryfir456.safepatch",
- "build":{"beforeDevCommand":"npm run dev","devUrl":"http://localhost:1420","beforeBuildCommand":"npm run build","frontendDist":"../dist"},
- "app":{"windows":[{"label":"main","title":"SafePatch — Read-only Windows Inventory","width":1180,"height":820,"minWidth":760,"minHeight":600}],"security":{"csp":"default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'"}},
- "bundle":{"active":false,"icon":["icons/icon.ico"]}
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SafePatch Preview",
+  "version": "0.1.0",
+  "identifier": "io.github.henryfir456.safepatch",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "SafePatch Preview — Read-only Inventory",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 760,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "publisher": "henryfir456",
+    "shortDescription": "Read-only inventory preview; no CVE analysis or automatic updates.",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "template": "installers/preview.nsi",
+        "languages": [
+          "English"
+        ]
+      },
+      "wix": {
+        "template": "installers/preview.wxs",
+        "upgradeCode": "903586ee-61da-4e98-bc9e-7e59a3bd63a7",
+        "enableElevatedUpdateTask": false,
+        "language": "en-US"
+      }
+    }
+  }
 }
