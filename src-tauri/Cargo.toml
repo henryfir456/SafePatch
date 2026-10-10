@@ -40,3 +40,7 @@ path = "src/bin/inventory_probe.rs"
 [[bin]]
 name = "npm_probe"
 path = "src/bin/npm_probe.rs"
+
+[[bin]]
+name = "python_probe"
+path = "src/bin/python_probe.rs"
