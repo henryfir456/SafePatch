@@ -8,11 +8,4 @@ CREATE TABLE scan_project_graphs (
  environment_id TEXT NOT NULL REFERENCES environments(id),
  snapshot_json TEXT NOT NULL CHECK(json_valid(snapshot_json))
 );
--- Package catalog rows can be retained for findings/history references.
--- Only this membership defines packages in the latest successful environment graph.
-CREATE TABLE environment_current_packages (
- environment_id TEXT NOT NULL REFERENCES environments(id),package_id TEXT NOT NULL,
- PRIMARY KEY(environment_id,package_id),
- FOREIGN KEY(package_id,environment_id) REFERENCES packages(id,environment_id)
-);
 CREATE INDEX scan_runs_scope_time ON scan_runs(scope,started_at);
