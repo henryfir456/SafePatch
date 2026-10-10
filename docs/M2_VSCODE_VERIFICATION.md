@@ -8,9 +8,9 @@ No VS Code executable, extension entry point, package script or project dependen
 
 ## Verification gates
 
-- Local Windows 11 Home / build 26200, current user without elevation: UI 7 tests, SQLite 4 tests, Windows adapter 13 assertions, VS Code metadata 26 assertions, TypeScript production build and inherited module trap passed.
+- Local Windows 11 Home / build 26200, current user without elevation: UI 7 tests, SQLite 4 tests, Windows adapter 13 assertions, VS Code metadata 29 assertions, TypeScript production build and inherited module trap passed.
 - Failure-first regressions covered poisoned/non-scalar metadata, profile directory failure, extension directory failure, same ID/version at another location, malformed obsolete values, corrupt/oversized JSON, URI profile location and versioned application layout.
-- Actual fixed PowerShell stdin/stdout transport found 1 VS Code application metadata record and 10 extension records; Registry views and WinGet remained available. This is adapter evidence; Rust/native-WebView acceptance for this change is pending the digest-verified CI artifact.
+- Actual fixed PowerShell stdin/stdout transport found 1 VS Code application metadata record and 10 extension records, all 10 with indexed profile association; Registry views and WinGet remained available. Mixed separators are canonicalized identically before location hashing; profile version strings use ordinal comparison. This is adapter evidence; Rust/native-WebView acceptance for this change is pending the digest-verified CI artifact.
 - Local Rust/Cargo/MSVC/SDK are absent and were not installed. Hosted Windows build, Rust tests/Clippy and native acceptance remain pending. Fixtures do not establish device acceptance.
 
 ## Coverage limits

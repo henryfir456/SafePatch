@@ -94,7 +94,7 @@ function Get-VSCodeInventory([object[]]$Roots=$null) {
     foreach($rootInfo in $Roots) {
         if(Test-Cancelled){[void]$extensionCodes.Add('CANCELLED');break}
         try {
-        $profiles=@{}
+        $profiles=[Collections.Generic.Dictionary[string,Collections.Generic.List[string]]]::new([StringComparer]::Ordinal)
         $defaultIndex=[IO.Path]::Combine($rootInfo.extension_root,'extensions.json')
         if(Test-LocalMetadataPath $defaultIndex){try{Add-VSCodeProfileIndex $profiles $defaultIndex ($rootInfo.channel+'-default') $rootInfo.extension_root}catch{[void]$extensionCodes.Add('VSCODE_PROFILE_INDEX_UNAVAILABLE')}}
         $profileRoot=[IO.Path]::Combine($rootInfo.user_data,'profiles')
@@ -117,6 +117,7 @@ function Get-VSCodeInventory([object[]]$Roots=$null) {
                 if($timer.Elapsed.TotalSeconds -gt 15 -or $extensionCount -ge 5000){[void]$extensionCodes.Add('VSCODE_METADATA_LIMIT');break}
                 if($obsolete.ContainsKey([IO.Path]::GetFileName($directory))){continue}
                 try {
+                    $directory=[IO.Path]::GetFullPath($directory).Replace('/','\')
                     $manifest=Read-LocalMetadataJson ([IO.Path]::Combine($directory,'package.json'))
                     $candidate=Convert-VSCodeExtensionManifest $manifest (Get-PathHash $directory) $rootInfo.scope 'UNKNOWN'
                     $key=$candidate.display_name+'|'+$candidate.installed_version+'|'+$candidate.install_path_hash
@@ -155,9 +156,9 @@ function Get-VSCodeInventory([object[]]$Roots=$null) {
                 $product=Read-LocalMetadataJson ([IO.Path]::Combine($metadataLocation,'resources/app/product.json'))
                 if($product.applicationName -isnot [string] -or $product.applicationName -notmatch '\A[A-Za-z0-9_-]{1,128}\z'){throw 'VSCODE_PRODUCT_INVALID'}
                 $version=if($null -ne $appManifest.PSObject.Properties['version'] -and $appManifest.version -is [string] -and $appManifest.version -match '\A\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\z'){$appManifest.version}else{$null}
-                $name=Get-CleanText $product.nameShort
-                if($null -eq $name){$name='VS Code metadata'}
-                $pathHash=Get-PathHash $metadataLocation
+                $name=if($null -ne $product.PSObject.Properties['nameShort']){Get-CleanText $product.nameShort}else{$null}
+                if($null -eq $name -or $name -eq 'UNKNOWN'){$name='VS Code metadata'}
+                $pathHash=Get-PathHash ([IO.Path]::GetFullPath($metadataLocation).Replace('/','\'))
                 $records.Add([pscustomobject]@{display_name=$name;publisher=$null;installed_version=$version;normalized_id=('vscode-app:'+$product.applicationName.ToLowerInvariant());install_path_hash=$pathHash;installation_source='UNKNOWN';scanner='vscode';source_id=$pathHash;scope=$scope;view='metadata';catalog_source='manifest-unverified';profile_ref=$null})
                 $appCount++
             }catch{

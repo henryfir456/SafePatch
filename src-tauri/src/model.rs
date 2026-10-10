@@ -98,7 +98,7 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
             || r.installation_source != "UNKNOWN" {
             return Err("ADAPTER_INVALID_RECORD");
         }
-        let name = clean(Some(r.display_name)).ok_or("ADAPTER_EMPTY_NAME")?;
+        let name = clean(Some(r.display_name)).or_else(||(r.scanner=="vscode").then(||"VS Code metadata".to_owned())).ok_or("ADAPTER_EMPTY_NAME")?;
         let publisher = clean(r.publisher);
         let version = clean(r.installed_version);
         let normalized_id = clean(r.normalized_id);
@@ -152,4 +152,5 @@ mod tests {
     #[test] fn controls_and_unknown_version_are_handled_as_data(){let mut a=record();a.display_name="<script>\0payload</script>".into();a.installed_version=Some("Unknown".into());let r=run(vec![a]);assert_eq!(r[0].display_name,"<script>payload</script>");assert_eq!(r[0].installed_version,None);assert_eq!(r[0].identity_confidence,"UNKNOWN");}
     #[test] fn raw_paths_and_fake_scanner_are_rejected(){let mut a=record();a.install_path_hash=Some("C:\\Private".into());assert!(normalize(AdapterOutput{records:vec![a],coverage:vec![]},"now").is_err());let mut b=record();b.scanner="mock".into();assert!(normalize(AdapterOutput{records:vec![b],coverage:vec![]},"now").is_err());}
     #[test] fn extension_profiles_and_locations_remain_distinct(){let mut a=record();a.scanner="vscode-extension".into();a.view="metadata".into();a.profile_ref=Some("stable-default".into());a.source_id=hash("path/default");let mut b=a.clone();b.profile_ref=Some("stable-abc123".into());b.source_id=hash("path/abc123");let r=run(vec![a,b]);assert_eq!(r.len(),2);assert!(r.iter().all(|a|a.provenance[0].profile_ref.is_some()));}
+    #[test] fn unknown_app_name_preserves_healthy_registry_inventory(){let healthy=record();let mut app=record();app.scanner="vscode".into();app.view="metadata".into();app.display_name="UNKNOWN".into();let r=run(vec![healthy,app]);assert_eq!(r.len(),2);assert!(r.iter().any(|a|a.display_name=="Example"));assert!(r.iter().any(|a|a.display_name=="VS Code metadata"));}
 }

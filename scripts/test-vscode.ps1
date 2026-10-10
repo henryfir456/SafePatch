@@ -84,8 +84,17 @@ try {
     foreach($name in @('package','product')){[IO.File]::Copy((Join-Path $appRoot ('resources/app/'+$name+'.json')),(Join-Path $versionedMetadata ($name+'.json')))}
     $versioned=Get-VSCodeInventory @([pscustomobject]@{extension_root=$brokenStore;user_data=$userData;application_roots=@($versionedRoot);channel='stable';scope='user'})
     Assert (@($versioned.records | Where-Object {$_.scanner -eq 'vscode' -and $_.installed_version -eq '1.99.0'}).Count -eq 1) 'versioned VS Code installation layout is inventoried'
+    $mixed=Get-VSCodeInventory @([pscustomobject]@{extension_root=$store.Replace('\','/');user_data=$userData;application_roots=@($appRoot);channel='stable';scope='user'})
+    Assert (@($mixed.records | Where-Object {$_.installed_version -eq '1.2.3' -and $_.profile_ref -eq 'stable-default'}).Count -eq 1) 'mixed path separators retain exact profile identity'
+    [IO.File]::WriteAllText((Join-Path $store 'first/package.json'),'{"publisher":"ExamplePublisher","name":"sample-tool","version":"1.2.3-beta"}')
+    [IO.File]::WriteAllText((Join-Path $store 'extensions.json'),'[{"identifier":{"id":"ExamplePublisher.sample-tool"},"version":"1.2.3-Beta","relativeLocation":"first"}]')
+    $caseMismatch=Get-VSCodeInventory @([pscustomobject]@{extension_root=$store;user_data=$userData;application_roots=@($appRoot);channel='stable';scope='user'})
+    Assert (@($caseMismatch.records | Where-Object {$_.installed_version -eq '1.2.3-beta' -and $_.profile_ref -eq 'UNKNOWN'}).Count -eq 1) 'prerelease version casing mismatch cannot claim a profile'
+    [IO.File]::WriteAllText((Join-Path $appRoot 'resources/app/product.json'),'{"nameShort":"UNKNOWN","applicationName":"code"}')
+    $unknownName=Get-VSCodeInventory @([pscustomobject]@{extension_root=$brokenStore;user_data=$userData;application_roots=@($appRoot);channel='stable';scope='user'})
+    Assert (@($unknownName.records | Where-Object {$_.scanner -eq 'vscode' -and $_.display_name -ne 'UNKNOWN'}).Count -eq 1) 'unknown app name falls back before Rust normalization'
 } finally {
     $resolved=[IO.Path]::GetFullPath($testRoot)
     if($resolved.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase) -and [IO.Directory]::Exists($resolved)){Remove-Item -LiteralPath $resolved -Recurse -Force}
 }
-Write-Output 'VS Code metadata assertions: PASS (26). Authored files; not device acceptance.'
+Write-Output 'VS Code metadata assertions: PASS (29). Authored files; not device acceptance.'
