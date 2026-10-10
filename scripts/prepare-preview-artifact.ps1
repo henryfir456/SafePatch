@@ -52,6 +52,7 @@ if(@($properties|Where-Object{$_.Fields[0] -eq 'ALLUSERS' -and $_.Fields[1]}).Co
 $privileges=[int]$db.SummaryInformation(0).Property(15)
 if(($privileges -band 8) -ne 8){throw 'PREVIEW_MSI_ELEVATION_REQUIRED'}
 $conditions=Rows 'SELECT Condition FROM LaunchCondition'
+Write-Output ('PREVIEW_COMPILED_MSI_CONDITIONS='+($conditions|ConvertTo-Json -Depth 4 -Compress))
 if(-not($conditions|Where-Object{$_.Fields[0] -match 'NOT ALLUSERS'})){throw 'PREVIEW_MSI_OVERRIDE_UNGUARDED'}
 $registry=Rows 'SELECT Root FROM Registry'
 if(@($registry|Where-Object{$_.Fields[0] -ne '1'}).Count -ne 0){throw 'PREVIEW_MSI_MACHINE_REGISTRY'}

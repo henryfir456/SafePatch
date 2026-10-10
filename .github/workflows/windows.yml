@@ -39,10 +39,6 @@ jobs:
       - name: Node resource and lifecycle regression tests
         shell: powershell
         run: ./scripts/test-node.ps1
-      - name: Rust unit tests and migrations
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
-      - name: Rust static analysis
-        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Parse Preview CI scripts
         shell: pwsh
         run: |
@@ -55,6 +51,13 @@ jobs:
       - name: Preview failure and Windows PowerShell encoding contracts
         shell: powershell
         run: ./scripts/test-preview-contracts.ps1
+      - name: Real Windows Installer table reader preflight (metadata fixture only)
+        shell: pwsh
+        run: ./scripts/test-preview-msi.ps1
+      - name: Rust unit tests and migrations
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
+      - name: Rust static analysis
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Production Windows EXE and MSI bundles
         run: npm run tauri -- build --verbose --no-binary-patching -- --locked
       - name: Verify compiled production packages and stage Preview
