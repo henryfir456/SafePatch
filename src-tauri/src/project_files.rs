@@ -3,6 +3,8 @@ use crate::npm::DependencyGraph;
 use std::{path::Path,sync::atomic::AtomicBool};
 #[cfg(not(windows))]
 pub fn read_npm_project(_root:&Path,_cancel:&AtomicBool)->Result<DependencyGraph,&'static str>{Err("WINDOWS_REQUIRED")}
+#[cfg(not(windows))]
+pub fn npm_metadata_hashes(_root:&Path)->Result<Vec<Option<String>>,&'static str>{Err("WINDOWS_REQUIRED")}
 #[cfg(windows)]
 mod local {
     use super::*;
@@ -99,6 +101,12 @@ mod local {
         if root.marker_exists("yarn.lock"){graph.codes.push("YARN_FORMAT_NOT_SCANNED".into())}
         graph.codes.sort();graph.codes.dedup();cancelled(cancel)?;Ok(graph)
     }
+    pub fn fingerprints(path:&Path)->Result<Vec<Option<String>>,&'static str>{
+        use sha2::{Digest,Sha256};
+        let root=Root::open(path)?;let cancel=AtomicBool::new(false);
+        [("package-lock.json",MAX_LOCK_BYTES),("npm-shrinkwrap.json",MAX_LOCK_BYTES),("package.json",1024*1024)]
+            .into_iter().map(|(name,limit)|root.read_metadata(name,limit,&cancel).map(|bytes|bytes.map(|bytes|format!("{:x}",Sha256::digest(bytes))))).collect()
+    }
     #[cfg(test)]mod tests{
         use super::*;
         #[test]fn verified_ancestor_handles_prevent_boundary_replacement(){
@@ -132,3 +140,5 @@ mod local {
 }
 #[cfg(windows)]
 pub fn read_npm_project(root:&Path,cancel:&AtomicBool)->Result<DependencyGraph,&'static str>{local::read(root,cancel)}
+#[cfg(windows)]
+pub fn npm_metadata_hashes(root:&Path)->Result<Vec<Option<String>>,&'static str>{local::fingerprints(root)}

@@ -22,7 +22,7 @@ pub struct DependencyGraph {
     pub lockfile_kind:String,pub root_path_hash:String,pub observed_at:String,
     pub packages:Vec<DependencyPackage>,pub edges:Vec<DependencyEdge>,pub codes:Vec<String>,
 }
-pub use crate::project_files::read_npm_project;
+pub use crate::project_files::{read_npm_project,npm_metadata_hashes};
 pub fn validate_graph(graph:&DependencyGraph)->Result<(),&'static str>{
     let hex=|s:&str|s.len()==64&&s.bytes().all(|b|b.is_ascii_hexdigit());
     if !hex(&graph.environment_id)||!hex(&graph.root_path_hash)||!hex(&graph.lockfile_hash)||!matches!(graph.lockfile_version,1..=3)
@@ -346,6 +346,7 @@ mod tests {
     fn network_traversal_and_cancel_inputs_never_read_a_project(){
         use std::path::Path;
         assert_eq!(read_npm_project(Path::new(r"\\invalid.example\private"),&AtomicBool::new(false)).err(),Some("NPM_ROOT_INVALID"));
+        assert_eq!(npm_metadata_hashes(Path::new(r"\\invalid.example\private")).err(),Some("NPM_ROOT_INVALID"));
         assert_eq!(read_npm_project(Path::new(r"C:\chosen\..\outside"),&AtomicBool::new(false)).err(),Some("NPM_ROOT_INVALID"));
         assert_eq!(read_npm_project(Path::new(r"C:\never-open"),&AtomicBool::new(true)).err(),Some("CANCELLED"));
     }
