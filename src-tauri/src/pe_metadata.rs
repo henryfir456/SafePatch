@@ -6,7 +6,7 @@ pub const MAX_PE_BYTES:usize=64*1024*1024;
 #[serde(deny_unknown_fields)]
 pub struct PeMetadata {
     pub product_version:Option<String>,pub file_version:Option<String>,
-    pub product_name:Option<String>,pub company_name:Option<String>,
+    pub product_name:Option<String>,pub company_name:Option<String>,pub codes:Vec<String>,
 }
 fn span(bytes:&[u8],offset:usize,length:usize)->Result<&[u8],&'static str>{
     bytes.get(offset..offset.checked_add(length).ok_or(BAD)?).ok_or(BAD)
@@ -20,7 +20,7 @@ fn dword(bytes:&[u8],offset:usize)->Result<usize,&'static str>{
 fn aligned(offset:usize)->Result<usize,&'static str>{Ok(offset.checked_add(3).ok_or(BAD)?&!3)}
 fn map_rva(bytes:&[u8],sections:&[u8],rva:usize,length:usize)->Result<usize,&'static str>{
     let mut result=None;
-    for section in sections.chunks_exact(40){
+    for section in sections.as_chunks::<40>().0{
         let address=dword(section,12)?;let size=dword(section,16)?;let raw=dword(section,20)?;
         if let Some(relative)=rva.checked_sub(address){
             if relative.checked_add(length).is_some_and(|end|end<=size){
@@ -35,14 +35,15 @@ fn directory(resource:&[u8],offset:usize)->Result<Vec<(usize,usize)>,&'static st
     span(resource,offset,16)?;let count=word(resource,offset+12)?+word(resource,offset+14)?;
     if count>1024{return Err("PE_RESOURCE_SIZE_LIMIT")}
     let entries=span(resource,offset+16,count*8)?;
-    entries.chunks_exact(8).map(|s|Ok((dword(s,0)?,dword(s,4)?))).collect()
+    entries.as_chunks::<8>().0.iter().map(|s|Ok((dword(s,0)?,dword(s,4)?))).collect()
 }
 struct Block<'a>{key:String,value:&'a [u8],children:&'a [u8],length:usize,kind:usize}
 fn block(bytes:&[u8])->Result<Block<'_>,&'static str>{
     let length=word(bytes,0)?;if length<8{return Err(BAD)}let bytes=span(bytes,0,length)?;
     let units=word(bytes,2)?;let kind=word(bytes,4)?;if kind>1{return Err(BAD)}
     let mut offset=6;let mut key=Vec::new();
-    loop{let value=word(bytes,offset)? as u16;offset+=2;if value==0{break}if key.len()>=128{return Err("PE_RESOURCE_SIZE_LIMIT")}key.push(value);}
+    loop{let value=word(bytes,offset)? as u16;offset+=2;if value==0{break}
+        if key.len()>=128{return Err("PE_RESOURCE_SIZE_LIMIT")}key.push(value);}
     let key=String::from_utf16(&key).map_err(|_|BAD)?;let start=aligned(offset)?;
     let value_length=if kind==1{units.checked_mul(2).ok_or(BAD)?}else{units};
     let value=span(bytes,start,value_length)?;let child_offset=aligned(start.checked_add(value_length).ok_or(BAD)?)?;
@@ -58,17 +59,22 @@ fn children<'a>(mut bytes:&'a [u8],budget:&mut usize)->Result<Vec<Block<'a>>,&'s
         result.push(b);bytes=if next<=bytes.len(){&bytes[next..]}else if length==bytes.len(){&[]}else{return Err(BAD)};
     }Ok(result)
 }
-fn retain(target:&mut Option<String>,b:&Block<'_>)->Result<(),&'static str>{
+fn retain(target:&mut Option<String>,b:&Block<'_>)->Result<bool,&'static str>{
     if b.kind!=1||b.value.len()>514||!b.children.is_empty(){return Err(BAD)}
-    let mut units:Vec<_>=b.value.chunks_exact(2).map(|s|u16::from_le_bytes([s[0],s[1]])).collect();
-    if units.last()==Some(&0){units.pop();}
+    let mut units:Vec<_>=b.value.as_chunks::<2>().0.iter().map(|s|u16::from_le_bytes([s[0],s[1]])).collect();
+    if units.last()!=Some(&0){return Err(BAD)}units.pop();
     let value=String::from_utf16(&units).map_err(|_|BAD)?;
     if value.chars().any(char::is_control){return Err(BAD)}
-    if value.is_empty(){return Ok(())}
+    let allowed=!value.is_empty()&&value.len()<=256&&!value.contains(['\\','/',':','@']);
+    let allowed=allowed&&match b.key.as_str(){
+        "FileVersion"=>value.len()<=128&&value.split('.').count()<=4&&value.split('.').all(|s|!s.is_empty()&&s.bytes().all(|c|c.is_ascii_digit())),
+        "ProductVersion"=>value.len()<=128&&value.bytes().all(|c|c.is_ascii_alphanumeric()||matches!(c,b'.'|b'-'|b'_'|b'+'|b'!'|b' ')),_=>true,
+    };
+    if !allowed{*target=None;return Ok(false)}
     if target.as_ref().is_some_and(|old|old!=&value){return Err("PE_VERSION_RESOURCE_CONFLICT")}
-    *target=Some(value);Ok(())
+    *target=Some(value);Ok(true)
 }
-fn version_resource(payload:&[u8],metadata:&mut PeMetadata,budget:&mut usize)->Result<(),&'static str>{
+fn version_resource(payload:&[u8],metadata:&mut PeMetadata,budget:&mut usize,unknown:&mut std::collections::BTreeSet<String>)->Result<(),&'static str>{
     let root=block(payload)?;if root.key!="VS_VERSION_INFO"||root.kind!=0{return Err(BAD)}
     if payload.len().saturating_sub(root.length)>3{return Err(BAD)}
     for info in children(root.children,budget)?{
@@ -77,7 +83,8 @@ fn version_resource(payload:&[u8],metadata:&mut PeMetadata,budget:&mut usize)->R
             if table.key.len()!=8||!table.key.bytes().all(|c|c.is_ascii_hexdigit()){return Err(BAD)}
             for value in children(table.children,budget)?{
                 let target=match value.key.as_str(){"ProductVersion"=>&mut metadata.product_version,"FileVersion"=>&mut metadata.file_version,"ProductName"=>&mut metadata.product_name,"CompanyName"=>&mut metadata.company_name,_=>continue};
-                retain(target,&value)?;
+                if unknown.contains(&value.key){continue}
+                if !retain(target,&value)?{unknown.insert(value.key.clone());metadata.codes.push(match value.key.as_str(){"ProductVersion"=>"PE_PRODUCT_VERSION_UNKNOWN","FileVersion"=>"PE_FILE_VERSION_UNKNOWN","ProductName"=>"PE_PRODUCT_NAME_UNKNOWN",_=>"PE_COMPANY_NAME_UNKNOWN"}.into());}
             }
         }
     }Ok(())
@@ -96,16 +103,17 @@ pub fn parse_pe_metadata(bytes:&[u8])->Result<PeMetadata,&'static str>{
     if resource_length>2*1024*1024{return Err("PE_RESOURCE_SIZE_LIMIT")}
     let sections=span(bytes,pe+24+optional_length,section_count*40)?;
     let offset=map_rva(bytes,sections,resource_rva,resource_length)?;let resource=span(bytes,offset,resource_length)?;
-    let mut metadata=PeMetadata::default();let mut leaves=0;let mut budget=2048;
+    let mut metadata=PeMetadata::default();let mut leaves=0;let mut budget=2048;let mut unknown=std::collections::BTreeSet::new();
     for (kind,next) in directory(resource,0)?{
-        if kind!=16{continue}if next&0x80000000==0{return Err(BAD)}
+        if kind!=16{continue}
+        if next&0x80000000==0{return Err(BAD)}
         for (_,next) in directory(resource,next&0x7fffffff)?{
             if next&0x80000000==0{return Err(BAD)}
             for (_,leaf) in directory(resource,next&0x7fffffff)?{
                 if leaf&0x80000000!=0{return Err(BAD)}leaves+=1;if leaves>8{return Err("PE_RESOURCE_SIZE_LIMIT")}
                 span(resource,leaf,16)?;let rva=dword(resource,leaf)?;let size=dword(resource,leaf+4)?;
                 let relative=rva.checked_sub(resource_rva).ok_or(BAD)?;
-                version_resource(span(resource,relative,size)?,&mut metadata,&mut budget)?;
+                version_resource(span(resource,relative,size)?,&mut metadata,&mut budget,&mut unknown)?;
             }
         }
     }
@@ -114,7 +122,7 @@ pub fn parse_pe_metadata(bytes:&[u8])->Result<PeMetadata,&'static str>{
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn align(v:&mut Vec<u8>){while v.len()%4!=0{v.push(0)}}
+    fn align(v:&mut Vec<u8>){while !v.len().is_multiple_of(4){v.push(0)}}
     fn block(key:&str,value:&[u8],value_length:u16,kind:u16,children:&[Vec<u8>])->Vec<u8>{
         let mut v=vec![0,0];v.extend(value_length.to_le_bytes());v.extend(kind.to_le_bytes());
         for c in key.encode_utf16().chain(Some(0)){v.extend(c.to_le_bytes())}align(&mut v);v.extend(value);align(&mut v);

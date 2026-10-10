@@ -91,7 +91,7 @@ mod local {
             let path_hash=hash(&parent.path.join("python.exe").to_string_lossy().to_ascii_lowercase());
             let mut interpreter=PythonInterpreter{id:hash(&format!("python-interpreter:{path_hash}")),path_hash,version:None,file_version:None,product_name:None,publisher:None,source:"PE_VERSION_RESOURCE_METADATA".into(),codes:vec!["INTERPRETER_IDENTITY_NOT_VERIFIED".into(),"PE_RESOURCE_METADATA_NOT_EXECUTION_PROOF".into()]};
             match parse_pe_metadata(&bytes){
-                Ok(pe)=>{interpreter.version=pe.product_version.filter(|v|runtime_version(v));interpreter.file_version=pe.file_version;interpreter.product_name=pe.product_name;interpreter.publisher=pe.company_name;},
+                Ok(pe)=>{interpreter.version=pe.product_version.filter(|v|runtime_version(v));interpreter.file_version=pe.file_version;interpreter.product_name=pe.product_name;interpreter.publisher=pe.company_name;interpreter.codes.extend(pe.codes);},
                 Err(code)=>interpreter.codes.push(code.into()),
             }
             if interpreter.version.is_none(){interpreter.codes.push("PYTHON_INTERPRETER_VERSION_UNKNOWN".into())}
