@@ -40,6 +40,10 @@ pub fn exact_version(value:&str)->bool {
     if let Some(next)=suffix(rest,&["dev"]){rest=next;}
     rest.is_empty()
 }
+pub(crate) fn runtime_version(value:&str)->bool{
+    let release=value.split(|c:char|!c.is_ascii_digit()&&c!='.').next().unwrap_or("").trim_end_matches('.');
+    release.split('.').count()==3&&exact_version(value)&&!value.contains(['!','+'])
+}
 pub(crate) fn valid_name(name:&str)->bool{
     !name.is_empty()&&name.len()<=214&&name.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)&&name.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)&&name.bytes().all(|c|c.is_ascii_alphanumeric()||matches!(c,b'.'|b'_'|b'-'))
 }
@@ -91,8 +95,7 @@ pub fn parse_venv_config(bytes:&[u8])->Result<VenvMetadata,&'static str>{
         let key=key.trim().to_ascii_lowercase();let value=value.trim();
         match key.as_str(){
             "version"=>{if seen_version{return Err("PYTHON_VENV_CONFIG_DUPLICATE")}seen_version=true;
-                let release=value.split(|c:char|!c.is_ascii_digit()&&c!='.').next().unwrap_or("").trim_end_matches('.');
-                if exact_version(value)&&release.split('.').count()==3&&!value.contains(['!','+']){version=Some(value.to_owned())}else{partial=true;}
+                if runtime_version(value){version=Some(value.to_owned())}else{partial=true;}
             },
             "include-system-site-packages"=>{if seen_system{return Err("PYTHON_VENV_CONFIG_DUPLICATE")}seen_system=true;
                 system=match value.to_ascii_lowercase().as_str(){"true"=>Some(true),"false"=>Some(false),_=>{partial=true;None}};

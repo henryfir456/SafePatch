@@ -25,17 +25,17 @@ fn codes(values:&[String])->bool{values.len()<=128&&values.iter().all(|v|!v.is_e
 fn display(value:&Option<String>)->bool{value.as_ref().is_none_or(|v|!v.is_empty()&&v.len()<=256&&!v.contains(['\\','/',':','@'])&&!v.chars().any(char::is_control))}
 fn resource_version(value:&str)->bool{value.len()<=128&&value.split('.').count()<=4&&value.split('.').all(|s|!s.is_empty()&&s.bytes().all(|c|c.is_ascii_digit()))}
 pub fn validate_snapshot(snapshot:&PythonSnapshot)->Result<(),&'static str>{
-    use crate::{model::hash,python_metadata::{valid_name,normalized_name,exact_version}};
+    use crate::{model::hash,python_metadata::{valid_name,normalized_name,exact_version,runtime_version}};
     let bad="PYTHON_SNAPSHOT_INVALID";
     if !digest(&snapshot.root_path_hash)||snapshot.environment_id!=hash(&format!("python-environment:{}",snapshot.root_path_hash))||chrono::DateTime::parse_from_rfc3339(&snapshot.observed_at).is_err()||snapshot.observed_at.len()>64||!matches!(snapshot.environment_kind.as_str(),"VENV_METADATA"|"INTERPRETER_DIRECTORY_METADATA")||snapshot.packages.len()>2500||snapshot.interpreters.len()>2||!codes(&snapshot.codes){return Err(bad)}
-    if let Some(config)=&snapshot.venv_metadata{if !codes(&config.codes)||config.declared_version.as_ref().is_some_and(|v|!exact_version(v)){return Err(bad)}}
+    if let Some(config)=&snapshot.venv_metadata{if !codes(&config.codes)||config.declared_version.as_ref().is_some_and(|v|!runtime_version(v)){return Err(bad)}}
     let mut ids=std::collections::BTreeSet::new();let mut slots=std::collections::BTreeSet::new();
     for p in &snapshot.packages{
         if !digest(&p.slot_hash)||!ids.insert(&p.id)||!slots.insert(&p.slot_hash)||!valid_name(&p.display_name)||p.name!=normalized_name(&p.display_name)||p.version.as_ref().is_some_and(|v|!exact_version(v))||p.direct_status!="UNKNOWN"||p.source!="DIST_INFO_METADATA"||!matches!(p.installer.as_str(),"PIP_INSTALLER_METADATA"|"UV_INSTALLER_METADATA"|"CONDA_INSTALLER_METADATA"|"UNKNOWN")||!codes(&p.codes)||p.id!=hash(&format!("{}:{}:{}:{}",snapshot.environment_id,p.slot_hash,p.name,p.version.as_deref().unwrap_or("UNKNOWN"))){return Err(bad)}
     }
     let mut paths=std::collections::BTreeSet::new();
     for p in &snapshot.interpreters{
-        if !digest(&p.path_hash)||!paths.insert(&p.path_hash)||p.id!=hash(&format!("python-interpreter:{}",p.path_hash))||p.version.as_ref().is_some_and(|v|!exact_version(v))||p.file_version.as_ref().is_some_and(|v|!resource_version(v))||!display(&p.product_name)||!display(&p.publisher)||p.source!="PE_VERSION_RESOURCE_METADATA"||!codes(&p.codes){return Err(bad)}
+        if !digest(&p.path_hash)||!paths.insert(&p.path_hash)||p.id!=hash(&format!("python-interpreter:{}",p.path_hash))||p.version.as_ref().is_some_and(|v|!runtime_version(v))||p.file_version.as_ref().is_some_and(|v|!resource_version(v))||!display(&p.product_name)||!display(&p.publisher)||p.source!="PE_VERSION_RESOURCE_METADATA"||!codes(&p.codes){return Err(bad)}
     }
     Ok(())
 }
@@ -44,7 +44,7 @@ pub fn read_python_environment(_root:&Path,_cancel:&AtomicBool)->Result<PythonSn
 #[cfg(windows)]
 mod local {
     use super::*;
-    use crate::{model::hash,project_files::local::Root,python_metadata::{parse_distribution,parse_venv_config,exact_version,MAX_METADATA_BYTES},pe_metadata::{parse_pe_metadata,MAX_PE_BYTES}};
+    use crate::{model::hash,project_files::local::Root,python_metadata::{parse_distribution,parse_venv_config,runtime_version,MAX_METADATA_BYTES},pe_metadata::{parse_pe_metadata,MAX_PE_BYTES}};
     use std::{collections::BTreeMap,fs,sync::atomic::Ordering};
     fn cancelled(cancel:&AtomicBool)->Result<(),&'static str>{if cancel.load(Ordering::Relaxed){Err("CANCELLED")}else{Ok(())}}
     fn error(code:&'static str)->&'static str{match code {
@@ -62,10 +62,6 @@ mod local {
     fn marker(root:&Root,name:&str)->Result<bool,&'static str>{
         if name.is_empty()||name.contains(['\\','/',':'])||name=="."||name==".."||name.chars().any(char::is_control){return Err("PYTHON_METADATA_UNSAFE")}
         root.unchanged().map_err(error)?;Ok(fs::symlink_metadata(root.path.join(name)).is_ok())
-    }
-    fn runtime_version(value:&str)->bool{
-        let release=value.split(|c:char|!c.is_ascii_digit()&&c!='.').next().unwrap_or("").trim_end_matches('.');
-        release.split('.').count()==3&&exact_version(value)&&!value.contains(['!','+'])
     }
     pub fn collect(path:&Path,cancel:&AtomicBool)->Result<PythonSnapshot,&'static str>{
         cancelled(cancel)?;let root=Root::open(path).map_err(error)?;
