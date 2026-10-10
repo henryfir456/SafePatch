@@ -71,3 +71,11 @@ The acceptance binary writes only local `desktop-acceptance.sqlite`, `desktop-ac
 The M2 VS Code collector is included in the same scan and source filters. [VS Code coverage](M2_VSCODE_VERIFICATION.md) documents profiles, bounded metadata traversal and limits. The combined adapter's outer watchdog is now 125 seconds; the original M1-only 100-second bound described above predates this collector.
 
 The Node collector adds resource-only runtime discovery and offline lifecycle dates. [Node coverage](M2_NODE_VERIFICATION.md) records limits and current verification gates. With this collector the owned adapter bound is 145 seconds and native acceptance bound is 200 seconds; earlier bounds in this historical M1 guide predate Node discovery.
+
+## Selected npm project (#7)
+
+In the npm project section, enter one local absolute directory containing `package-lock.json` or `npm-shrinkwrap.json`, then start its read-only scan. The directory is an explicit selection; the application does not search other projects. Cancel the active project scan with its cancel button. Windows and project scans share one active-scan slot and retain separate latest snapshots.
+
+The table shows declared package names, exact versions when valid, DIRECT/TRANSITIVE/UNKNOWN relationships and metadata source. Search and relationship filters operate locally; use the next/previous buttons for more than 200 rows, and select a package to inspect its declared outgoing dependency edges. Restart restores the latest npm snapshot without requiring the private directory to be stored or re-entered. Enter it again only to perform another scan.
+
+No npm, Node, lifecycle script or project binary is executed. Lockfile declarations are not installed-package proof; PARTIAL and UNKNOWN states remain visible. Unsupported formats, unsafe paths and failures use stable codes without revealing the selected path. See [npm verification and limits](M2_NPM_VERIFICATION.md) for the separate automated and actual-device evidence gates.

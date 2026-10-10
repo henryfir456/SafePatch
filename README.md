@@ -23,3 +23,6 @@ See [Windows development and operation](docs/WINDOWS_DEVELOPMENT.md) and the exp
 M2 #5 adds read-only VS Code/application/extension/profile metadata to the same scan and passed Windows 11 native WebView scan/cancel/restart acceptance. See [VS Code verification and coverage](docs/M2_VSCODE_VERIFICATION.md) for evidence and explicit limitations. npm, Python and Git collectors remain pending (#7–#9).
 
 M2 #6 adds distinct Node runtime metadata and offline support lifecycle and passed Windows 11 native WebView scan/cancel/restart acceptance with two actual runtime paths and two distinct observed version values. See [Node verification/coverage](docs/M2_NODE_VERIFICATION.md) for evidence, the observed WinGet timeout/recovery and coverage limits. Support lifecycle is independent of vulnerability applicability.
+
+
+M2 #7 adds opt-in npm lockfile inventory and passed Windows 11 native WebView scan/cancel/restart acceptance with 159 actual declarations and 189 dependency edges. [npm verification and limits](docs/M2_NPM_VERIFICATION.md) distinguishes lockfile declarations from installed packages and records read-only metadata fingerprints, exact SQLite/graph comparisons and synthetic pagination tests separately. Python and Git are pending (#8–#9).
