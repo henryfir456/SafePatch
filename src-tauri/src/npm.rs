@@ -108,26 +108,30 @@ pub fn parse_lock(bytes:&[u8],environment_id:&str,manifest:Option<&[u8]>,cancel:
             metadata.insert(slot.clone(),descriptor.clone());entries.push(Declaration{slot:slot.clone(),descriptor:descriptor.clone()});
         }
     }
-    let mut packages=Vec::new();let mut slots=BTreeMap::new();let mut descriptors=Vec::new();
+    let mut packages=Vec::new();let mut slots=BTreeMap::new();let mut descriptors=Vec::new();let mut link_targets=BTreeMap::new();
     for entry in entries{
         check_cancel(cancel)?;
-        let fallback=slot_name(&entry.slot);
-        let name=match entry.descriptor.get("name"){Some(Value::String(name)) if valid_name(name)=>Some(name.as_str()),None=>fallback,_=>None};
-        let Some(name)=name else{codes.insert("NPM_IDENTITY_INVALID".into());continue};
         let mut version_descriptor=&entry.descriptor;
-        if entry.descriptor.get("link").and_then(Value::as_bool)==Some(true){
+        let is_link=entry.descriptor.get("link").and_then(Value::as_bool)==Some(true);
+        let mut target_slot=None;
+        if is_link{
             let mut visited=BTreeSet::new();let mut found=false;
             for _ in 0..16{
                 let Some(target)=version_descriptor.get("resolved").and_then(Value::as_str).filter(|s|valid_location(s))else{break};
                 if !visited.insert(target.to_owned()){break}
                 let Some(next)=metadata.get(target)else{break};version_descriptor=next;
-                if next.get("link").and_then(Value::as_bool)!=Some(true){found=true;break}
+                if next.get("link").and_then(Value::as_bool)!=Some(true){found=true;target_slot=Some(target.to_owned());break}
             }
             if !found{codes.insert("NPM_LINK_TARGET_UNKNOWN".into());version_descriptor=&entry.descriptor;}
         }
-        let version=version_descriptor.get("version").and_then(Value::as_str).filter(|v|exact_version(v)).map(str::to_owned);
+        let identity_descriptor=if target_slot.is_some(){version_descriptor}else{&entry.descriptor};
+        let fallback=slot_name(target_slot.as_deref().unwrap_or(&entry.slot));
+        let name=match identity_descriptor.get("name"){Some(Value::String(name)) if valid_name(name)=>Some(name.as_str()),None=>fallback,_=>None};
+        let Some(name)=name else{codes.insert("NPM_IDENTITY_INVALID".into());continue};
+        let version=if is_link&&target_slot.is_none(){None}else{version_descriptor.get("version").and_then(Value::as_str).filter(|v|exact_version(v)).map(str::to_owned)};
         if version.is_none(){codes.insert("NPM_VERSION_UNKNOWN".into());}
         let index=packages.len();slots.insert(entry.slot.clone(),index);
+        if let Some(target)=target_slot{link_targets.insert(entry.slot.clone(),target);}
         packages.push(DependencyPackage{id:hash(&format!("{environment_id}\0{}",entry.slot)),name:name.into(),version,direct_status:"UNKNOWN".into(),source:source_kind(&entry.descriptor),slot_hash:hash(&entry.slot)});
         descriptors.push(entry);
     }
@@ -136,12 +140,16 @@ pub fn parse_lock(bytes:&[u8],environment_id:&str,manifest:Option<&[u8]>,cancel:
     if manifest.is_some()&&manifest_value.is_none(){codes.insert("NPM_MANIFEST_INVALID".into());}
     let direct_root=if version==1{manifest_value.as_ref().and_then(Value::as_object)}else{metadata.get("").or_else(||manifest_value.as_ref().and_then(Value::as_object))};
     if let Some(descriptor)=direct_root.filter(|d|direct_fields.iter().any(|(field,_)|d.get(*field).is_some_and(Value::is_object))){
-        for package in &mut packages{package.direct_status="TRANSITIVE".into()}
+        let complete=direct_fields.iter().all(|(field,_)|descriptor.get(*field).is_none_or(|value|value.as_object().is_some_and(|names|names.iter().all(|(name,spec)|valid_name(name)&&spec.as_str().is_some_and(|s|s.len()<=4096&&!s.chars().any(char::is_control))))));
+        if complete{for package in &mut packages{package.direct_status="TRANSITIVE".into()}}else{codes.insert("NPM_DIRECT_RELATION_UNKNOWN".into());}
         for (name,_) in dependency_names(descriptor,&direct_fields,&mut codes){
             if let Some(index)=resolve_slot("",name,&slots){packages[index].direct_status="DIRECT".into()}else{codes.insert("NPM_DEPENDENCY_UNRESOLVED".into());}
         }
     }else{codes.insert("NPM_DIRECT_RELATION_UNKNOWN".into());}
     let mut edges=BTreeMap::<(String,String),BTreeSet<String>>::new();
+    for (slot,target) in link_targets{
+        if let (Some(from),Some(to))=(slots.get(&slot),slots.get(&target)){edges.entry((packages[*from].id.clone(),packages[*to].id.clone())).or_default().insert("LINK_TARGET".into());}else{codes.insert("NPM_LINK_TARGET_UNKNOWN".into());}
+    }
     for (index,entry) in descriptors.iter().enumerate(){
         check_cancel(cancel)?;
         let fields=if version==1{vec![("requires","DEPENDENCY")]}else{direct_fields.to_vec()};
