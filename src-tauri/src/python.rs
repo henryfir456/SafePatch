@@ -159,6 +159,20 @@ mod tests {
         let d=root.join("Lib/site-packages").join(slot);fs::create_dir_all(&d).unwrap();
         fs::write(d.join("METADATA"),format!("Metadata-Version: 2.6\nName: {name}\nVersion: {version}\n\nprivate body")).unwrap();fs::write(d.join("INSTALLER"),b"pip\n").unwrap();d
     }
+    fn junction(path:&Path,target:&Path){
+        use std::{fs::OpenOptions,os::windows::{ffi::OsStrExt,fs::OpenOptionsExt,io::AsRawHandle}};
+        #[link(name="kernel32")]extern "system"{fn DeviceIoControl(handle:*mut std::ffi::c_void,code:u32,input:*const std::ffi::c_void,input_size:u32,output:*mut std::ffi::c_void,output_size:u32,returned:*mut u32,overlapped:*mut std::ffi::c_void)->i32;}
+        fs::create_dir(path).unwrap();let substitute:Vec<u16>=format!(r"\??\{}",target.display()).encode_utf16().collect();let print:Vec<u16>=target.as_os_str().encode_wide().collect();
+        let mut bytes=Vec::new();bytes.extend(0xa0000003u32.to_le_bytes());bytes.extend(((8+2*(substitute.len()+1+print.len()+1)) as u16).to_le_bytes());bytes.extend(0u16.to_le_bytes());
+        for value in [0,substitute.len()*2,(substitute.len()+1)*2,print.len()*2]{bytes.extend((value as u16).to_le_bytes())}for value in substitute.iter().chain([0].iter()).chain(print.iter()).chain([0].iter()){bytes.extend(value.to_le_bytes())}
+        let handle=OpenOptions::new().write(true).custom_flags(0x02000000|0x00200000).open(path).unwrap();let mut returned=0;
+        assert_ne!(unsafe{DeviceIoControl(handle.as_raw_handle() as _,0x900a4,bytes.as_ptr() as _,bytes.len() as u32,std::ptr::null_mut(),0,&mut returned,std::ptr::null_mut())},0);
+    }
+    #[test]fn scripts_and_lib_junctions_are_rejected_before_nested_metadata_probes(){
+        for name in ["Scripts","Lib"]{let t=environment();let outside=tempfile::tempdir().unwrap();fs::write(outside.path().join("python.exe"),b"private-outside").unwrap();distribution(outside.path(),"outside-1.dist-info","outside-secret","1");
+            let path=t.path().join(name);junction(&path,outside.path());let s=read_python_environment(t.path(),&AtomicBool::new(false)).unwrap();assert!(s.interpreters.is_empty()&&s.packages.is_empty());assert!(s.codes.contains(&"PYTHON_METADATA_UNSAFE".into()));assert!(!serde_json::to_string(&s).unwrap().contains("outside-secret"));fs::remove_dir(path).unwrap();
+        }
+    }
     #[test]fn selected_venv_metadata_retains_distinct_slots_versions_and_unknown_runtime(){
         let t=environment();distribution(t.path(),"Demo_pkg-1.0.dist-info","Demo_pkg","1.0");distribution(t.path(),"demo_pkg-2.0.dist-info","demo-pkg","2.0");
         let s=read_python_environment(t.path(),&AtomicBool::new(false)).unwrap();assert_eq!(s.environment_kind,"VENV_METADATA");assert_eq!(s.packages.len(),2);assert!(s.interpreters.is_empty());
