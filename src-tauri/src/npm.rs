@@ -222,4 +222,21 @@ mod tests {
         let a=parse_lock(&bytes,&"a".repeat(64),None,&AtomicBool::new(false)).unwrap();let b=parse_lock(&bytes,&"b".repeat(64),None,&AtomicBool::new(false)).unwrap();
         assert!(a.packages.iter().all(|p|!b.packages.iter().any(|q|q.id==p.id)));
     }
+    #[test]fn partial_root_metadata_cannot_prove_transitive_only_status(){
+        let g=parse(json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"a":"*"},"devDependencies":"corrupt"},"node_modules/a":{"version":"1.0.0","dependencies":{"leaf":"*"}},"node_modules/leaf":{"version":"2.0.0"}}}));
+        assert_eq!(g.packages.iter().find(|p|p.name=="a").unwrap().direct_status,"DIRECT");
+        assert_eq!(g.packages.iter().find(|p|p.name=="leaf").unwrap().direct_status,"UNKNOWN");
+    }
+    #[test]fn workspace_link_keeps_target_identity_and_graph_relation(){
+        let g=parse(json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"shortcut":"file:packages/lib"}},"node_modules/shortcut":{"link":true,"resolved":"packages/lib"},"packages/lib":{"name":"real-workspace","version":"1.2.3","dependencies":{"leaf":"^2"}},"node_modules/leaf":{"version":"2.0.0"}}}));
+        let linked=g.packages.iter().find(|p|p.direct_status=="DIRECT").unwrap();
+        assert_eq!(linked.name,"real-workspace");assert_eq!(linked.version.as_deref(),Some("1.2.3"));
+        let target=g.packages.iter().find(|p|p.name=="real-workspace"&&p.id!=linked.id).unwrap();
+        assert!(g.edges.iter().any(|e|e.from_id==linked.id&&e.to_id==target.id&&e.kinds.contains(&"LINK_TARGET".into())));
+        assert!(!serde_json::to_string(&g).unwrap().contains("packages/lib"));
+    }
+    #[test]fn unresolved_link_cannot_promote_an_extra_claimed_version(){
+        let g=parse(json!({"lockfileVersion":3,"packages":{"":{"dependencies":{"a":"file:../outside"}},"node_modules/a":{"link":true,"resolved":"../outside","version":"1.2.3"}}}));
+        assert!(g.packages[0].version.is_none());
+    }
 }
