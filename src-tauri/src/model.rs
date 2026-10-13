@@ -97,7 +97,7 @@ fn hash_valid(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit())
 }
 fn date_valid(s:&str)->bool{chrono::NaiveDate::parse_from_str(s,"%Y-%m-%d").is_ok_and(|d|d.format("%Y-%m-%d").to_string()==s)}
-pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Coverage>), &'static str> {
+pub fn normalize(mut output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Coverage>), &'static str> {
     if output.records.len() > 40000 || output.coverage.len() > 9 {
         return Err("ADAPTER_LIMIT");
     }
@@ -159,6 +159,7 @@ pub fn normalize(output: AdapterOutput, now: &str) -> Result<(Vec<Asset>, Vec<Co
     }
     let mut result: Vec<Asset> = assets.into_values().collect();
     result.sort_by(|a,b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()).then(a.id.cmp(&b.id)));
+    for c in &mut output.coverage {if c.scanner=="winget-updates"{c.count=result.iter().filter(|a|a.update.status=="UPDATE_AVAILABLE").count();}}
     Ok((result, output.coverage))
 }
 

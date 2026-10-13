@@ -53,4 +53,7 @@ try {
 function Invoke-WinGetUpdateProcess {throw 'WINGET_UPDATE_TIMEOUT'}
 $result=Get-WinGetUpdates 'fixture-only' $records
 Assert ($result.status -eq 'UNKNOWN' -and $records[0].update.status -eq 'ERROR') 'collector fault boundary'
+function Get-AppxPackage {return @()}
+$unavailable=Get-WinGetInventory
+Assert ($unavailable.records.Count -eq 0 -and $unavailable.coverage[0].codes[0] -eq 'WINGET_UNAVAILABLE') 'unavailable preserves explicit uncertainty'
 Write-Output 'WinGet update regression tests: PASS; synthetic tables and owned Node children, not device upgrade acceptance.'

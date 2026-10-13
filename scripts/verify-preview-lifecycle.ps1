@@ -54,6 +54,7 @@ try {
   $report.windows_scan='PASS';$report.assets=$s.assets;$scanId=$s.windows.id
   Click $root '開始唯讀掃描';Click $root '取消掃描';$cancel=Wait-Stats 'windows' @('CANCELLED')
   $report.cancel='PASS'
+  Click $root '完整軟體清單'
   # Npm declaration inventory uses this public, owned checkout's existing lockfile.
   $edit=Control $root 'npm project directory'
   if(-not $edit){throw 'PREVIEW_UIA_CONTROL_UNAVAILABLE'}
