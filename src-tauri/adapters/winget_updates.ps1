@@ -17,19 +17,20 @@ function Convert-WinGetUpdateTable([string]$Text, $Records) {
     foreach($line in ($plain -split '\r?\n')) {
         if($line.Trim() -match '^-{5,}$'){$inTable=$true;$sawTable=$true;continue}
         if(-not $inTable){continue}
-        if([string]::IsNullOrWhiteSpace($line)){$inTable=$false;continue}
+        if([string]::IsNullOrWhiteSpace($line)){continue}
         $parts=@($line.Trim() -split '\s+')
         if($parts.Length -gt 0 -and $parts[-1] -ceq 'winget'){$parts=@($parts[0..($parts.Length-2)])}
-        $matches=[Collections.Generic.List[int]]::new()
+        $positions=[Collections.Generic.List[int]]::new();$structural=[Collections.Generic.List[int]]::new()
         for($i=1;$i -lt $parts.Length;$i++){
-            if($ids.Contains($parts[$i]) -and ($parts.Length-$i -eq 2 -or $parts.Length-$i -eq 3)){$matches.Add($i)}
+            if(($parts.Length-$i -eq 2 -or $parts.Length-$i -eq 3) -and $parts[$i] -match '^[A-Za-z0-9][A-Za-z0-9._+-]*\.[A-Za-z0-9._+-]+(?:\u2026)?$' -and $parts[$i] -match '[A-Za-z]'){$structural.Add($i);if($ids.Contains($parts[$i])){$positions.Add($i)}}
         }
-        if($matches.Count -ne 1){
+        if($positions.Count -ne 1){
             # Fixed-width data rows have padding; reject changed/truncated IDs.
-            if($line -match '\S\s{2,}\S'){continue}
-            $inTable=$false;continue
+            if($structural.Count -ge 1 -and $positions.Count -eq 0){continue}
+            if($line -match '^\d+\s+[^\s]+(?: [^\s]+)*$'){continue}
+            throw 'WINGET_UPDATE_FORMAT'
         }
-        $at=$matches[0]
+        $at=$positions[0]
         $current=$parts[$at+1]
         $target=if($parts.Length-$at -eq 3){$parts[$at+2]}else{$null}
         if($current.Length -gt 128 -or ($null -ne $target -and $target.Length -gt 128)){throw 'WINGET_UPDATE_FORMAT'}

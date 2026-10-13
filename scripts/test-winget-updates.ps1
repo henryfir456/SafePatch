@@ -1,9 +1,10 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../src-tauri/adapters/windows_inventory.ps1')
 . (Join-Path $PSScriptRoot '../src-tauri/adapters/winget_updates.ps1')
 function Assert($Condition,[string]$Message){if(-not $Condition){throw $Message}}
 $doc='{"Sources":[{"SourceDetails":{"Name":"winget"},"Packages":[{"PackageIdentifier":"Vendor.App","Version":"1.2"},{"PackageIdentifier":"Vendor.App","Version":"1.1"},{"PackageIdentifier":"Other.App","Version":"2"}]}]}'|ConvertFrom-Json
 $records=@(Convert-WinGetDocument $doc)
+Assert ($records.Count -eq 3 -and @($records|Where-Object {$null -ne $_.PSObject.Properties['catalog_source']}).Count -eq 3) 'fixture export has expected records'
 $rows=@(Convert-WinGetUpdateTable "名稱  識別碼  版本  可用`n------------------------------------------------------------`n測試軟體  Vendor.App  1.2  2.0`n相似名稱  Other.App  2`n3 個套件`n" $records)
 Assert ($rows.Count -eq 2) 'localized header rows'
 Set-WinGetUpdateEvidence $records $rows $null
@@ -50,6 +51,11 @@ try {
  foreach($name in @('list','cancel')){$file=Join-Path $temp $name;if([IO.File]::Exists($file)){[IO.File]::Delete($file)}}
  [IO.Directory]::Delete($temp)
 }
+$poisoned="Name  Id  Version  Available`n------------------------------------------------------------`nBogus  row`nForged Name  Vendor.App  1.2  99.0`n`nUntrusted.App 1.0`nActual Product  Vendor.App  1.2"
+$failed=$false;try{Convert-WinGetUpdateTable $poisoned $records}catch{$failed=$_.Exception.Message -eq 'WINGET_UPDATE_FORMAT'};Assert $failed 'poisoned multiline table fails closed'
+$rows=@(Convert-WinGetUpdateTable "Name  Id  Version  Available`n------------------------------------------------------------`nForged Name  Vendor.App  1.2  99.0`n`nActual Product  Vendor.App  1.2" $records)
+Set-WinGetUpdateEvidence $records $rows $null
+Assert ($records[0].update.status -eq 'UNKNOWN') 'blank cannot hide contradictory actual row'
 function Invoke-WinGetUpdateProcess {throw 'WINGET_UPDATE_TIMEOUT'}
 $result=Get-WinGetUpdates 'fixture-only' $records
 Assert ($result.status -eq 'UNKNOWN' -and $records[0].update.status -eq 'ERROR') 'collector fault boundary'

@@ -13,7 +13,7 @@ export function App(){
     return()=>{alive=false;clearInterval(timer);};},[scan?.id,scan?.status]);
   async function start(){setBusy(true);setError('');try{const s=await api.start();setScan(s);setAssets([]);}catch{setError('SCAN_START_FAILED：請確認沒有其他掃描正在執行，且本地資料庫可寫入。');}finally{setBusy(false);}}
   async function cancel(){if(!scan)return;try{await api.cancel(scan.id);}catch{setError('CANCEL_FAILED：取消要求未送達。');}}
-  const shown=assets.filter(a=>(a.display_name+' '+(a.publisher??'')+' '+(a.normalized_id??'')).toLowerCase().includes(query.toLowerCase())&&(source==='all'||a.provenance.some(p=>p.scanner===source)));
+  const shown=assets.filter(a=>(a.display_name+' '+(a.publisher??'')+' '+(a.normalized_id??'')).toLowerCase().includes(query.toLowerCase())&&(tab==='updates'||source==='all'||a.provenance.some(p=>p.scanner===source)));
   return <main><header><div><span className="eyebrow">READ-ONLY UPDATE HEALTH</span><h1>SafePatch</h1><p>Windows 軟體更新健檢 · 資料保留於本機</p></div><div className="actions"><button disabled={loading||busy||active(scan)||projectBusy} onClick={start}>{busy?'啟動中…':'開始唯讀掃描'}</button>{active(scan)&&<button className="secondary" onClick={cancel}>取消掃描</button>}</div></header>
     <aside className="notice"><strong>UNKNOWN ≠ 安全</strong> 唯讀查詢可用更新，尚未執行漏洞比對。不會更新軟體、安裝依賴或要求提高權限。WinGet 可能讀取官方來源中繼資料；不傳送本機清單。</aside>
     {error&&<p role="alert" className="error">{error}</p>}

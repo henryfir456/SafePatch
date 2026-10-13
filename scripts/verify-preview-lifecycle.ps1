@@ -66,6 +66,7 @@ try {
   $report.npm_scan='PASS';$report.packages=$n.packages;$report.edges=$n.edges;$npmId=$n.npm.id
   Close-Own $exeApp;$exeApp=$null
   $msiApp=Start-Process -FilePath (Join-Path $msiDir 'safepatch.exe') -PassThru;$root=App-Root $msiApp
+  Click $root '完整軟體清單'
   $end=[DateTime]::UtcNow.AddSeconds(25);while(-not(Control $root 'npm: PARTIAL')){if([DateTime]::UtcNow -gt $end){throw 'PREVIEW_UIA_RESTORED_RESULT_UNAVAILABLE'};Start-Sleep -Milliseconds 100}
   $reopened=Read-Stats
   if($reopened.npm.id -ne $npmId -or $reopened.windows.status -ne 'CANCELLED' -or $reopened.packages -ne $n.packages){throw 'PREVIEW_RESTART_MISMATCH'}
