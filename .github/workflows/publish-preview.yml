@@ -19,7 +19,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      PUBLISH_PREVIEW: 'false'
+      PUBLISH_PREVIEW: 'true'
     steps:
       - name: Verify exact merged-main CI artifact and publish only reviewed bytes
         shell: pwsh
