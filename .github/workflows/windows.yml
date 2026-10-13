@@ -31,6 +31,9 @@ jobs:
       - name: PowerShell adapter regression tests
         shell: powershell
         run: ./scripts/test-adapter.ps1
+      - name: WinGet update evidence and bounded query regression tests
+        shell: powershell
+        run: ./scripts/test-winget-updates.ps1
       - name: Reject inherited PowerShell module hijacking
         run: node scripts/test-module-path.mjs
       - name: VS Code read-only metadata regression tests

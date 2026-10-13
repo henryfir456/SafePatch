@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
 pub const SCRIPT:&str=include_str!("../adapters/windows_inventory.ps1");
+pub const UPDATE_SCRIPT:&str=include_str!("../adapters/winget_updates.ps1");
 pub const VSCODE_SCRIPT:&str=include_str!("../adapters/vscode_inventory.ps1");
 pub const NODE_SCRIPT:&str=include_str!("../adapters/node_inventory.ps1");
 pub const NODE_SCHEDULE:&str=include_str!("../adapters/node_schedule.json");
@@ -70,7 +71,7 @@ pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result
     let output_thread=std::thread::spawn(move||{let mut buffer=Vec::new();stdout.take(MAX_OUTPUT+1).read_to_end(&mut buffer).map(|_|buffer)});
     let error_thread=std::thread::spawn(move||{let mut stderr=stderr;std::io::copy(&mut stderr,&mut std::io::sink())});
     // Strip BOM/CRLF consistently and force a terminating newline for -Command -.
-    let script=format!("{}\n{}\n{}\nexit\n",NODE_SCRIPT.replace("\r\n","\n"),VSCODE_SCRIPT.replace("\r\n","\n"),SCRIPT.replace("\r\n","\n"));
+    let script=format!("{}\n{}\n{}\n{}\nexit\n",UPDATE_SCRIPT.replace("\r\n","\n"),NODE_SCRIPT.replace("\r\n","\n"),VSCODE_SCRIPT.replace("\r\n","\n"),SCRIPT.replace("\r\n","\n"));
     if stdin.write_all(script.as_bytes()).is_err(){let _=child.kill();let _=child.wait();return Err("ADAPTER_INPUT_FAILED".into())}
     drop(stdin);
     let started=Instant::now();
@@ -79,8 +80,8 @@ pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result
         if cancel.load(Ordering::Relaxed){let _=std::fs::write(&cancel_file,b"cancel");}
         if let Ok(phase)=std::fs::read_to_string(&progress_file){if phase!=previous_phase{match phase.as_str(){"REGISTRY_DONE"=>progress(45,"Registry complete / querying signed WinGet"),"WINGET_DONE"=>progress(65,"reading VS Code metadata"),"VSCODE_DONE"=>progress(75,"reading Node PE metadata"),"NODE_DONE"=>progress(85,"normalizing actual inventory"),_=>{}}previous_phase=phase;}}
         match child.try_wait(){Ok(Some(status))=>break status,Ok(None)=>{},Err(_)=>{let _=child.kill();let _=child.wait();return Err("ADAPTER_WAIT_FAILED".into())}}
-        // Registry 30s, source15s, WinGet45s, VSCode15s, Node15s; cleanup overhead.
-        if started.elapsed()>Duration::from_secs(145){let _=child.kill();let _=child.wait();return Err("ADAPTER_TIMEOUT".into())}
+        // Registry30s, source15s, export45s, updates45s, VSCode15s, Node15s; cleanup overhead.
+        if started.elapsed()>Duration::from_secs(195){let _=child.kill();let _=child.wait();return Err("ADAPTER_TIMEOUT".into())}
         std::thread::sleep(Duration::from_millis(100));
     };
     let output=output_thread.join().map_err(|_|"ADAPTER_READ_FAILED")?.map_err(|_|"ADAPTER_READ_FAILED")?;

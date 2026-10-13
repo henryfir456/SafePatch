@@ -41,7 +41,7 @@ Copy-Item -LiteralPath $production.Path -Destination (Join-Path $stage 'safepatc
 Copy-Item -LiteralPath 'docs/WINDOWS_PREVIEW.md' -Destination (Join-Path $stage 'README.md')
 $commit=(& git rev-parse HEAD).Trim()
 if($commit -notmatch '^[0-9a-f]{40}$'){throw 'PREVIEW_COMMIT_INVALID'}
-@{schema=1;product='SafePatch Preview';version=$version;channel='Preview';architecture='x86_64';source_commit=$commit;ci_event=$env:GITHUB_EVENT_NAME;ci_run_id=$env:GITHUB_RUN_ID;ci_run_attempt=$env:GITHUB_RUN_ATTEMPT;host='GitHub Windows Server';os_build=[Environment]::OSVersion.Version.ToString();signature='UNSIGNED';production_sha256=$hash;installers=$files;features=@('Windows Registry/WinGet','VS Code/Extensions','Node resource metadata','npm lockfile declarations');user_windows_10_11='NOT_VERIFIED'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding utf8
+@{schema=1;product='SafePatch Preview';version=$version;channel='Preview';architecture='x86_64';source_commit=$commit;ci_event=$env:GITHUB_EVENT_NAME;ci_run_id=$env:GITHUB_RUN_ID;ci_run_attempt=$env:GITHUB_RUN_ATTEMPT;host='GitHub Windows Server';os_build=[Environment]::OSVersion.Version.ToString();signature='UNSIGNED';production_sha256=$hash;installers=$files;features=@('Read-only WinGet update health','Windows Registry/WinGet','VS Code/Extensions','Node resource metadata','npm lockfile declarations');user_windows_10_11='NOT_VERIFIED'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding utf8
 # Read compiled MSI tables, not just source configuration.
 $msi=Get-ChildItem -LiteralPath $stage -Filter '*.msi'
 $installer=New-Object -ComObject WindowsInstaller.Installer

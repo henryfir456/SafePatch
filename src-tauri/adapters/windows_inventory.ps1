@@ -98,6 +98,7 @@ function Confirm-OfficialWinGetSource([string]$Executable) {
         $info.FileName=$Executable; $info.Arguments='source export --name winget --disable-interactivity'
         $info.UseShellExecute=$false; $info.CreateNoWindow=$true
         $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
+        $info.StandardOutputEncoding=[Text.UTF8Encoding]::new($false,$true)
         $sourceProcess.StartInfo=$info; [void]$sourceProcess.Start(); $sourceStarted=$true
         $output=$sourceProcess.StandardOutput.ReadToEndAsync()
         $discard=$sourceProcess.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
@@ -153,7 +154,8 @@ function Get-WinGetInventory {
         $phase = 'PARSE'
         $document=[IO.File]::ReadAllText($temp) | ConvertFrom-Json
         $records=@(Convert-WinGetDocument $document)
-        return [pscustomobject]@{records=$records;coverage=@([pscustomobject]@{scanner='winget';status='PARTIAL';count=$records.Count;codes=@('CATALOG_MATCHES_ONLY','PUBLISHER_NOT_EXPORTED','NON_WINGET_SOURCES_NOT_SCANNED')})}
+        $updates=Get-WinGetUpdates $exe $records
+        return [pscustomobject]@{records=$records;coverage=@([pscustomobject]@{scanner='winget';status='PARTIAL';count=$records.Count;codes=@('CATALOG_MATCHES_ONLY','PUBLISHER_NOT_EXPORTED','NON_WINGET_SOURCES_NOT_SCANNED')},$updates)}
     } catch {
         $code=[string]$_.Exception.Message
         if($code -notmatch '^(WINGET_[A-Z_]+|CANCELLED)$'){$code='WINGET_'+$phase+'_FAILED'}

@@ -1,6 +1,7 @@
 param([switch]$RequireWinGet)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../src-tauri/adapters/windows_inventory.ps1')
+. (Join-Path $PSScriptRoot '../src-tauri/adapters/winget_updates.ps1')
 $timer=[Diagnostics.Stopwatch]::StartNew()
 $registry=Get-RegistryInventory
 $winget=Get-WinGetInventory
