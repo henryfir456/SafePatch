@@ -104,7 +104,11 @@ jobs:
           ZIP also contains the production safepatch.exe. SHA256SUMS.txt covers files extracted from that ZIP.
           Tracking: #22, #24. Python draft PR #21 remains unmerged.
           "@ | Set-Content -LiteralPath $notes -Encoding utf8
-          & gh release create $tag --repo $repo --target $source --draft --prerelease --latest=false --title 'SafePatch Windows Preview 0.1.0 (unsigned)' --notes-file $notes
+          # Create the fixed-source tag explicitly; saving a draft need not create its tag.
+          & gh api --method POST "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$source" | Out-Null
+          $createdRef=Api "git/ref/tags/$tag"
+          if($createdRef.object.type -ne 'commit' -or $createdRef.object.sha -ne $source){throw 'RELEASE_TAG_SOURCE_MISMATCH'}
+          & gh release create $tag --repo $repo --verify-tag --target $source --draft --prerelease --latest=false --title 'SafePatch Windows Preview 0.1.0 (unsigned)' --notes-file $notes
           $uploads=@($zip)
           $assetNames=@('SafePatch-Preview-0.1.0-x64-setup.exe','SafePatch-Preview-0.1.0-x64.msi','README.md','manifest.json','ci-package-checks.json','ci-lifecycle.json','SHA256SUMS.txt')
           foreach($name in $assetNames){$uploads+=Join-Path $files $name}
