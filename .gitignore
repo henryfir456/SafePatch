@@ -5,5 +5,5 @@ target/
 *.sqlite*
 *.private.json
 
-**/obj/
-**/bin/
+src-tauri/winget-helper/obj/
+src-tauri/winget-helper/bin/
