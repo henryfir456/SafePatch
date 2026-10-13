@@ -54,6 +54,11 @@ try {
  foreach($name in @('query','cancel')){$file=Join-Path $temp $name;if([IO.File]::Exists($file)){[IO.File]::Delete($file)}}
  [IO.Directory]::Delete($temp)
 }
+# Synthetic registration policy guards; never write COM registry test overrides.
+$package='Microsoft.DesktopAppInstaller_1.29.380.0_x64__8wekyb3d8bbwe'
+Assert (Test-WinGetComIdentity $package @($package) 'WindowsPackageManagerServer.exe' 0 $false) 'expected signed package registration'
+foreach($case in @(@($package,@($package),'WindowsPackageManagerServer.exe',0,$true),@($package,@('Other.Package'),'WindowsPackageManagerServer.exe',0,$false),@($package,@(),'WindowsPackageManagerServer.exe',0,$false),@($package,@($package),'untrusted.exe',0,$false),@($package,@($package),'WindowsPackageManagerServer.exe',1,$false))){Assert (-not (Test-WinGetComIdentity $case[0] $case[1] $case[2] $case[3] $case[4])) 'override/missing/foreign/system registration rejected'}
+function Confirm-WinGetComRegistration { }
 $env:SAFEPATCH_WINGET_HELPER=$node
 function Invoke-WinGetUpdateProcess {throw 'WINGET_UPDATE_TIMEOUT'}
 $result=Get-WinGetUpdates 'signature-verified-exe-placeholder' $records

@@ -154,7 +154,7 @@ function Get-WinGetInventory {
         $phase = 'PARSE'
         $document=[IO.File]::ReadAllText($temp) | ConvertFrom-Json
         $records=@(Convert-WinGetDocument $document)
-        $updates=Get-WinGetUpdates $exe $records
+        $updates=Get-WinGetUpdates $packages[0] $records
         return [pscustomobject]@{records=$records;coverage=@([pscustomobject]@{scanner='winget';status='PARTIAL';count=$records.Count;codes=@('CATALOG_MATCHES_ONLY','PUBLISHER_NOT_EXPORTED','NON_WINGET_SOURCES_NOT_SCANNED')},$updates)}
     } catch {
         $code=[string]$_.Exception.Message

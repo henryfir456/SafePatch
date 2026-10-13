@@ -1,3 +1,36 @@
+function Test-WinGetComIdentity([string]$PackageName,$IndexedPackages,[string]$ServerExecutable,$SystemExecutable,[bool]$ClassOverride) {
+    return (-not $ClassOverride -and $PackageName -cmatch '^Microsoft\.DesktopAppInstaller_[0-9.]+_x64__8wekyb3d8bbwe$' -and @($IndexedPackages).Count -eq 1 -and @($IndexedPackages)[0] -ceq $PackageName -and $ServerExecutable -ceq 'WindowsPackageManagerServer.exe' -and $SystemExecutable -is [int] -and $SystemExecutable -eq 0)
+}
+function Confirm-WinGetComRegistration($Package) {
+    $env:SAFEPATCH_WINGET_COM_VERIFIED=$null
+    $fullName=[string]$Package.PackageFullName
+    $server=Join-Path $Package.InstallLocation 'WindowsPackageManagerServer.exe'
+    $signature=Get-AuthenticodeSignature -LiteralPath $server
+    if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '^CN=Microsoft Corporation,'){throw 'WINGET_UPDATE_COM_UNTRUSTED'}
+    foreach($id in @('{C53A4F16-787E-42A4-B304-29EFFB4BF597}','{526534B8-7E46-47C8-8416-B1685C327D37}','{572DED96-9C60-4526-8F92-EE7D91D38C1A}')){
+        $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
+        $user=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+        $index=$null;$class=$null;$entry=$null;$override=$null;$userIndex=$null;$userClass=$null;$userServer=$null
+        try {
+            $override=$user.OpenSubKey(('SOFTWARE\Classes\CLSID\'+$id),$false)
+            $userIndex=$user.OpenSubKey(('SOFTWARE\Classes\PackagedCom\ClassIndex\'+$id),$false)
+            if($null -ne $userIndex -and (@($userIndex.GetSubKeyNames()).Count -ne 1 -or @($userIndex.GetSubKeyNames())[0] -cne $fullName)){throw 'WINGET_UPDATE_COM_UNTRUSTED'}
+            $userClass=$user.OpenSubKey(('SOFTWARE\Classes\PackagedCom\Package\'+$fullName+'\Class'),$false)
+            $userServer=$user.OpenSubKey(('SOFTWARE\Classes\PackagedCom\Package\'+$fullName+'\Server'),$false)
+            if($null -ne $userClass -or $null -ne $userServer){throw 'WINGET_UPDATE_COM_UNTRUSTED'}
+            $index=$base.OpenSubKey(('SOFTWARE\Classes\PackagedCom\ClassIndex\'+$id),$false)
+            if($null -eq $index){throw 'WINGET_UPDATE_COM_UNTRUSTED'}
+            $class=$base.OpenSubKey(('SOFTWARE\Classes\PackagedCom\Package\'+$fullName+'\Class\'+$id),$false)
+            if($null -eq $class){throw 'WINGET_UPDATE_COM_UNTRUSTED'}
+            $serverId=$class.GetValue('ServerId')
+            if($serverId -isnot [int] -or $serverId -lt 0){throw 'WINGET_UPDATE_COM_UNTRUSTED'}
+            $entry=$base.OpenSubKey(('SOFTWARE\Classes\PackagedCom\Package\'+$fullName+'\Server\'+$serverId),$false)
+            if($null -eq $entry -or -not (Test-WinGetComIdentity $fullName @($index.GetSubKeyNames()) ([string]$entry.GetValue('Executable')) $entry.GetValue('IsSystemExecutable') ($null -ne $override)) -or $entry.GetValue('ApplicationId') -cne 'WinGetComServer'){throw 'WINGET_UPDATE_COM_UNTRUSTED'}
+        } finally {foreach($key in @($userServer,$userClass,$userIndex,$override,$entry,$class,$index,$user,$base)){if($null -ne $key){$key.Dispose()}}}
+    }
+    # Process-only marker set exclusively after signed CLI/server + packaged registration checks.
+    $env:SAFEPATCH_WINGET_COM_VERIFIED='1'
+}
 # Fixed, read-only update query. Dot-source after windows_inventory functions.
 function Convert-WinGetBytes([byte[]]$Bytes) {
     if($Bytes.Length -gt 4194304){throw 'WINGET_UPDATE_LIMIT'}
@@ -70,8 +103,9 @@ function Set-WinGetUpdateEvidence($Records,$Rows,[string]$Failure) {
         $record|Add-Member -NotePropertyName update -NotePropertyValue $evidence -Force
     }
 }
-function Get-WinGetUpdates([string]$Executable,$Records) {
+function Get-WinGetUpdates($Package,$Records) {
     try {
+        Confirm-WinGetComRegistration $Package
         if(-not $env:SAFEPATCH_WINGET_HELPER -or -not [IO.File]::Exists($env:SAFEPATCH_WINGET_HELPER)){throw 'WINGET_UPDATE_HELPER_UNAVAILABLE'}
         $json=Invoke-WinGetUpdateProcess $env:SAFEPATCH_WINGET_HELPER
         try{$document=$json|ConvertFrom-Json}catch{throw 'WINGET_UPDATE_FORMAT'}

@@ -17,17 +17,24 @@ internal static class Program
     private static QueryResult Failure(string code) => new(1, "ERROR", code, []);
     // Registered Microsoft out-of-process COM classes, as in Microsoft's factory.
     // No activation of discovered paths or bundled arbitrary DLLs.
-    private static T Activate<T>(string clsid) where T : new()
+    [DllImport("ole32.dll", ExactSpelling=true)]
+    private static extern int CoCreateInstance(ref Guid clsid, IntPtr outer, uint context, ref Guid iid, out IntPtr result);
+    [DllImport("ole32.dll", ExactSpelling=true)]
+    private static extern int CoInitializeEx(IntPtr reserved,uint mode);
+    [DllImport("ole32.dll", ExactSpelling=true)]
+    private static extern void CoUninitialize();
+    private static T Activate<T>(string clsid,string iid) where T : new()
     {
-        var type=Type.GetTypeFromCLSID(Guid.Parse(clsid))!;
-        var instance=Activator.CreateInstance(type)!;
-        var pointer=Marshal.GetIUnknownForObject(instance);
+        var classId=Guid.Parse(clsid);var interfaceId=Guid.Parse(iid);
+        // CLSCTX_LOCAL_SERVER only: never activate registry in-process DLLs/remote servers.
+        Marshal.ThrowExceptionForHR(CoCreateInstance(ref classId,IntPtr.Zero,4,ref interfaceId,out var pointer));
         try {return MarshalInterface<T>.FromAbi(pointer);}
         finally {Marshal.Release(pointer);}
     }
     private static QueryResult Query()
     {
-        var manager = Activate<PackageManager>("C53A4F16-787E-42A4-B304-29EFFB4BF597");
+        if(Environment.GetEnvironmentVariable("SAFEPATCH_WINGET_COM_VERIFIED")!="1") return Failure("WINGET_UPDATE_COM_UNTRUSTED");
+        var manager = Activate<PackageManager>("C53A4F16-787E-42A4-B304-29EFFB4BF597","B375E3B9-F2E0-5C93-87A7-B67497F7E593");
         Phase="SOURCE";
         var source = manager.GetPackageCatalogByName("winget");
         if (source == null || !Official(source.Info)) return Failure("WINGET_UPDATE_SOURCE_UNTRUSTED");
@@ -36,14 +43,14 @@ internal static class Program
         // No explicit source refresh, agreement acceptance, source changes or REST lookups.
         source.PackageCatalogBackgroundUpdateInterval = TimeSpan.Zero;
         Phase="COMPOSITE_ACTIVATE";
-        var options = Activate<CreateCompositePackageCatalogOptions>("526534B8-7E46-47C8-8416-B1685C327D37");
+        var options = Activate<CreateCompositePackageCatalogOptions>("526534B8-7E46-47C8-8416-B1685C327D37","21ABAA76-089D-51C5-A745-C85EEFE70116");
         options.Catalogs.Add(source);
         options.CompositeSearchBehavior = CompositeSearchBehavior.LocalCatalogs;
         Phase="CONNECT";
         var connected = manager.CreateCompositePackageCatalog(options).Connect();
         if (connected.Status != ConnectResultStatus.Ok) return Failure("WINGET_UPDATE_CONNECT_FAILED");
         Phase="FIND_ACTIVATE";
-        var find = Activate<FindPackagesOptions>("572DED96-9C60-4526-8F92-EE7D91D38C1A");
+        var find = Activate<FindPackagesOptions>("572DED96-9C60-4526-8F92-EE7D91D38C1A","A5270EDD-7DA7-57A3-BACE-F2593553561F");
         find.ResultLimit=20000;
         Phase="SEARCH";
         var result = connected.PackageCatalog.FindPackages(find);
@@ -75,8 +82,10 @@ internal static class Program
         if (args.Length != 1 || args[0] != "query") result = Failure("WINGET_UPDATE_INVALID_MODE");
         else
         {
-            try { result = Query(); }
+            var initialized=false;
+            try {Marshal.ThrowExceptionForHR(CoInitializeEx(IntPtr.Zero,2));initialized=true;result=Query();}
             catch { result = Failure("WINGET_UPDATE_"+Phase+"_FAILED"); }
+            finally {if(initialized)CoUninitialize();}
         }
         // All names/versions are escaped JSON data; no raw HRESULT/exception/path output.
         var json = JsonSerializer.Serialize(result);

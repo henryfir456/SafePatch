@@ -71,7 +71,7 @@ pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result
     #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
     #[cfg(windows)] {
         command.env("SAFEPATCH_WINGET_HELPER",&helper).env("DOTNET_BUNDLE_EXTRACT_BASE_DIR",dir.path().join("dotnet"));
-        for name in ["DOTNET_STARTUP_HOOKS","DOTNET_ADDITIONAL_DEPS","DOTNET_SHARED_STORE","COR_ENABLE_PROFILING","COR_PROFILER","COR_PROFILER_PATH","CORECLR_ENABLE_PROFILING","CORECLR_PROFILER","CORECLR_PROFILER_PATH"] {command.env_remove(name);}
+        for name in ["SAFEPATCH_WINGET_COM_VERIFIED","DOTNET_STARTUP_HOOKS","DOTNET_ADDITIONAL_DEPS","DOTNET_SHARED_STORE","COR_ENABLE_PROFILING","COR_PROFILER","COR_PROFILER_PATH","CORECLR_ENABLE_PROFILING","CORECLR_PROFILER","CORECLR_PROFILER_PATH"] {command.env_remove(name);}
     }
     let mut child=command.spawn().map_err(|_|"ADAPTER_LAUNCH_FAILED")?;
     // Before supplying any script, contain only our child and its descendants.
