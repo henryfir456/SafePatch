@@ -16,6 +16,7 @@ npm run test:schema
 powershell -NoProfile -NonInteractive -File scripts/test-adapter.ps1
 powershell -NoProfile -NonInteractive -File scripts/test-vscode.ps1
 powershell -NoProfile -NonInteractive -File scripts/test-node.ps1
+./scripts/build-winget-helper.ps1
 cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
 cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 npm run tauri -- dev

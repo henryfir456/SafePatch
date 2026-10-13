@@ -2,6 +2,8 @@ param([switch]$RequireWinGet)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../src-tauri/adapters/windows_inventory.ps1')
 . (Join-Path $PSScriptRoot '../src-tauri/adapters/winget_updates.ps1')
+$helper=Join-Path $PSScriptRoot '../src-tauri/target/winget-helper/SafePatch.WinGetHelper.exe'
+if([IO.File]::Exists($helper)){$env:SAFEPATCH_WINGET_HELPER=[IO.Path]::GetFullPath($helper)}
 $timer=[Diagnostics.Stopwatch]::StartNew()
 $registry=Get-RegistryInventory
 $winget=Get-WinGetInventory

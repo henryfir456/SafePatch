@@ -1,65 +1,65 @@
-﻿$ErrorActionPreference='Stop'
+$ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../src-tauri/adapters/windows_inventory.ps1')
 . (Join-Path $PSScriptRoot '../src-tauri/adapters/winget_updates.ps1')
 function Assert($Condition,[string]$Message){if(-not $Condition){throw $Message}}
 $doc='{"Sources":[{"SourceDetails":{"Name":"winget"},"Packages":[{"PackageIdentifier":"Vendor.App","Version":"1.2"},{"PackageIdentifier":"Vendor.App","Version":"1.1"},{"PackageIdentifier":"Other.App","Version":"2"}]}]}'|ConvertFrom-Json
 $records=@(Convert-WinGetDocument $doc)
-Assert ($records.Count -eq 3 -and @($records|Where-Object {$null -ne $_.PSObject.Properties['catalog_source']}).Count -eq 3) 'fixture export has expected records'
-$rows=@(Convert-WinGetUpdateTable "名稱  識別碼  版本  可用`n------------------------------------------------------------`n測試軟體  Vendor.App  1.2  2.0`n相似名稱  Other.App  2`n3 個套件`n" $records)
-Assert ($rows.Count -eq 2) 'localized header rows'
+Assert ($records.Count -eq 3 -and @($records|Where-Object {$null -ne $_.PSObject.Properties['catalog_source']}).Count -eq 3) 'fixture export records'
+$json='{"schema":1,"status":"COMPLETE","code":null,"rows":[{"display_name":"Example App","package_id":"Vendor.App","installed_version":"1.2","target_version":"2.0","update_available":true},{"display_name":"Similar App","package_id":"Other.App","installed_version":"2","target_version":null,"update_available":false}]}'
+$document=$json|ConvertFrom-Json
+$rows=@(Convert-WinGetUpdateDocument $document)
 Set-WinGetUpdateEvidence $records $rows $null
-Assert ($records[0].update.status -eq 'UPDATE_AVAILABLE' -and $records[0].update.target_version -eq '2.0') 'confirmed target'
-Assert ($records[1].update.status -eq 'UNKNOWN') 'multi installed versions exact only'
-Assert ($records[2].update.status -eq 'NO_UPDATE_REPORTED') 'explicit no update row'
-Assert ($records[0].display_name -eq '測試軟體') 'actual display name'
-$english=@(Convert-WinGetUpdateTable "Name  Id  Version  Available  Source`r`n------------------------------------------------------------`r`nSimilar App  Vendor.App  1.2  2.0  winget`r`nSimilar App  Other.App  2  winget`r`n" $records)
-Assert ($english.Count -eq 2 -and $english[1].target_version -eq $null) 'optional source column'
-Set-WinGetUpdateEvidence $records @($english[0],$english[0]) $null
-Assert ($records[0].update.status -eq 'UPDATE_AVAILABLE') 'identical duplicate rows'
-$conflict=[pscustomobject]@{display_name='Similar';package_id='Vendor.App';installed_version='1.2';target_version='3'}
-Set-WinGetUpdateEvidence $records @($english[0],$conflict) $null
+Assert ($records[0].update.status -eq 'UPDATE_AVAILABLE' -and $records[0].update.target_version -eq '2.0') 'typed available upgrade'
+Assert ($records[1].update.status -eq 'UNKNOWN') 'other installed version is not assumed'
+Assert ($records[2].update.status -eq 'NO_UPDATE_REPORTED') 'explicit typed no update'
+Assert ($records[0].display_name -eq 'Example App') 'actual typed display name'
+Set-WinGetUpdateEvidence $records @($rows[0],$rows[0]) $null
+Assert ($records[0].update.status -eq 'UPDATE_AVAILABLE') 'identical duplicate candidates'
+$conflict=[pscustomobject]@{display_name='Similar App';package_id='Vendor.App';installed_version='1.2';target_version='3';update_available=$true}
+Set-WinGetUpdateEvidence $records @($rows[0],$conflict) $null
 Assert ($records[0].update.status -eq 'UNKNOWN') 'conflicting duplicate candidates'
-foreach($bad in @("Name  ID  Current`n-----`nName  Vendor.Ap…  1.2  2.0",'no table',"Name`n-----`nName  Untrusted.App  1  2")){
- $failed=$false;try{Convert-WinGetUpdateTable $bad $records}catch{$failed=$true};Assert $failed 'format/truncation/unknown ID fail closed'
+# Localized/poisoned human tables have no production parser at all.
+foreach($bad in @('{"schema":2,"status":"COMPLETE","rows":[]}','{"schema":1,"status":"COMPLETE","rows":[{"package_id":"Vendor.App"}]}','{"schema":1,"status":"COMPLETE","rows":[{"display_name":"Name","package_id":"Vendor.App","installed_version":"1","target_version":"2","update_available":"true"}]}','Name Id Version Available')){
+ $failed=$false;try{Convert-WinGetUpdateDocument ($bad|ConvertFrom-Json)}catch{$failed=$true};Assert $failed 'format and false typed booleans fail closed'
 }
-Assert ((Convert-WinGetBytes ([Text.UTF8Encoding]::new($false).GetBytes('測試軟體'))) -ceq '測試軟體') 'strict UTF8'
-$utf16=[byte[]]([Text.Encoding]::Unicode.GetPreamble()+[Text.Encoding]::Unicode.GetBytes('測試軟體'))
-Assert ((Convert-WinGetBytes $utf16) -ceq '測試軟體') 'UTF16 BOM'
-$failed=$false;try{Convert-WinGetBytes ([byte[]]@(255,255,255))}catch{$failed=$true};Assert $failed 'invalid encoding fails closed'
+foreach($code in @('WINGET_UPDATE_CONNECT_FAILED','WINGET_UPDATE_SEARCH_FAILED','WINGET_UPDATE_LIMIT')){
+ $failed=$false;try{Convert-WinGetUpdateDocument ([pscustomobject]@{schema=1;status='ERROR';code=$code;rows=@()})}catch{$failed=$_.Exception.Message -eq $code};Assert $failed 'typed API failure never becomes no report'
+}
+$poisoned=$json|ConvertFrom-Json;$poisoned.rows[0].display_name="Fake`nVendor.Other 1 99`n-----"
+$rows=@(Convert-WinGetUpdateDocument $poisoned)
+Assert ($rows[0].package_id -eq 'Vendor.App' -and $rows[0].target_version -eq '2.0') 'multiline display names cannot inject fields'
+Assert ((Convert-WinGetBytes ([Text.UTF8Encoding]::new($false).GetBytes([string][char]0x6e2c))) -ceq [string][char]0x6e2c) 'strict UTF8 non-ASCII'
+$utf16=[byte[]]([Text.Encoding]::Unicode.GetPreamble()+[Text.Encoding]::Unicode.GetBytes([string][char]0x6e2c))
+Assert ((Convert-WinGetBytes $utf16) -ceq [string][char]0x6e2c) 'UTF16 BOM'
+$failed=$false;try{Convert-WinGetBytes ([byte[]]@(255,255,255))}catch{$failed=$true};Assert $failed 'invalid encoding'
 Set-WinGetUpdateEvidence $records @() 'WINGET_UPDATE_TIMEOUT'
-Assert (@($records|Where-Object {$_.update.status -eq 'ERROR' -and $_.update.reason -eq 'WINGET_UPDATE_TIMEOUT'}).Count -eq 3) 'timeout preserves inventory with error'
-# Owned synthetic child fixtures verify real timeout / nonzero / cancellation cleanup.
+Assert (@($records|Where-Object {$_.update.status -eq 'ERROR'}).Count -eq 3) 'query faults preserve inventory'
+# Actual owned child execution tests timeout/nonzero/stdout/cancellation cleanup.
 $node=(Get-Command node.exe).Source
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('safepatch-test-'+[guid]::NewGuid().ToString('N'))
-$null=[IO.Directory]::CreateDirectory($temp)
-Push-Location $temp
-$previousDirectory=[Environment]::CurrentDirectory
-[Environment]::CurrentDirectory=$temp
+$null=[IO.Directory]::CreateDirectory($temp);Push-Location $temp
+$previousDirectory=[Environment]::CurrentDirectory;[Environment]::CurrentDirectory=$temp
 try {
- [IO.File]::WriteAllText((Join-Path $temp 'list'),'setTimeout(()=>{},10000)')
- $failed=$false;try{Invoke-WinGetUpdateProcess $node 200}catch{$failed=$_.Exception.Message -eq 'WINGET_UPDATE_TIMEOUT'};Assert $failed 'owned child timeout'
- [IO.File]::WriteAllText((Join-Path $temp 'list'),'process.exit(7)')
+ [IO.File]::WriteAllText((Join-Path $temp 'query'),'setTimeout(()=>{},10000)')
+ $failed=$false;try{Invoke-WinGetUpdateProcess $node 500}catch{$failed=$_.Exception.Message -eq 'WINGET_UPDATE_TIMEOUT'};Assert $failed 'owned child timeout'
+ [IO.File]::WriteAllText((Join-Path $temp 'query'),'process.exit(7)')
  $failed=$false;try{Invoke-WinGetUpdateProcess $node}catch{$failed=$_.Exception.Message -eq 'WINGET_UPDATE_COMMAND_FAILED'};Assert $failed 'owned child nonzero'
- [IO.File]::WriteAllText((Join-Path $temp 'list'),'process.stdout.write("測試軟體")',[Text.UTF8Encoding]::new($false))
- Assert ((Invoke-WinGetUpdateProcess $node) -ceq '測試軟體') 'actual child stdout encoding'
- [IO.File]::WriteAllText((Join-Path $temp 'list'),'setTimeout(()=>{},10000)')
+ [IO.File]::WriteAllText((Join-Path $temp 'query'),'process.stdout.write(String.fromCodePoint(0x6e2c))',[Text.UTF8Encoding]::new($false))
+ Assert ((Invoke-WinGetUpdateProcess $node) -ceq [string][char]0x6e2c) 'real child UTF8 bytes'
+ [IO.File]::WriteAllText((Join-Path $temp 'query'),'setTimeout(()=>{},10000)')
  $env:SAFEPATCH_CANCEL_FILE=Join-Path $temp 'cancel';[IO.File]::WriteAllText($env:SAFEPATCH_CANCEL_FILE,'cancel')
  $failed=$false;try{Invoke-WinGetUpdateProcess $node}catch{$failed=$_.Exception.Message -eq 'CANCELLED'};Assert $failed 'owned child cancellation'
 } finally {
  $env:SAFEPATCH_CANCEL_FILE=$null;[Environment]::CurrentDirectory=$previousDirectory;Pop-Location
- # Only explicitly owned fixture files are removed.
- foreach($name in @('list','cancel')){$file=Join-Path $temp $name;if([IO.File]::Exists($file)){[IO.File]::Delete($file)}}
+ foreach($name in @('query','cancel')){$file=Join-Path $temp $name;if([IO.File]::Exists($file)){[IO.File]::Delete($file)}}
  [IO.Directory]::Delete($temp)
 }
-$poisoned="Name  Id  Version  Available`n------------------------------------------------------------`nBogus  row`nForged Name  Vendor.App  1.2  99.0`n`nUntrusted.App 1.0`nActual Product  Vendor.App  1.2"
-$failed=$false;try{Convert-WinGetUpdateTable $poisoned $records}catch{$failed=$_.Exception.Message -eq 'WINGET_UPDATE_FORMAT'};Assert $failed 'poisoned multiline table fails closed'
-$rows=@(Convert-WinGetUpdateTable "Name  Id  Version  Available`n------------------------------------------------------------`nForged Name  Vendor.App  1.2  99.0`n`nActual Product  Vendor.App  1.2" $records)
-Set-WinGetUpdateEvidence $records $rows $null
-Assert ($records[0].update.status -eq 'UNKNOWN') 'blank cannot hide contradictory actual row'
+$env:SAFEPATCH_WINGET_HELPER=$node
 function Invoke-WinGetUpdateProcess {throw 'WINGET_UPDATE_TIMEOUT'}
-$result=Get-WinGetUpdates 'fixture-only' $records
+$result=Get-WinGetUpdates 'signature-verified-exe-placeholder' $records
 Assert ($result.status -eq 'UNKNOWN' -and $records[0].update.status -eq 'ERROR') 'collector fault boundary'
+$env:SAFEPATCH_WINGET_HELPER=$null
 function Get-AppxPackage {return @()}
 $unavailable=Get-WinGetInventory
-Assert ($unavailable.records.Count -eq 0 -and $unavailable.coverage[0].codes[0] -eq 'WINGET_UNAVAILABLE') 'unavailable preserves explicit uncertainty'
-Write-Output 'WinGet update regression tests: PASS; synthetic tables and owned Node children, not device upgrade acceptance.'
+Assert ($unavailable.records.Count -eq 0 -and $unavailable.coverage[0].codes[0] -eq 'WINGET_UNAVAILABLE') 'unavailable classified'
+Write-Output 'WinGet typed update regressions: PASS; synthetic JSON and owned children, not device acceptance.'

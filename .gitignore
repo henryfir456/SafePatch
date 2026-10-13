@@ -4,3 +4,6 @@ target/
 .local/
 *.sqlite*
 *.private.json
+
+**/obj/
+**/bin/

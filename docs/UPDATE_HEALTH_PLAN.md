@@ -1,17 +1,20 @@
-# v0.2.0 update health design and implementation plan — Issue #26
+# v0.2.0 更新健檢設計與實作計畫 — Issue #26
 
-Goal: one read-only Windows scan reports confirmed available versions with exact WinGet product identity, source and observation time. Vulnerability assessment remains NOT_CHECKED.
+目標：一次唯讀 Windows 掃描，提供可驗證產品 ID、目前／目標版本、可信來源與查詢時間；漏洞風險獨立為 NOT_CHECKED。
 
-Existing architecture: product-owned PowerShell adapter -> bounded Rust collector -> normalized assets -> immutable SQLite scan_assets JSON snapshots -> typed IPC -> React. Registry identities and separately installed versions remain distinct. No schema version change is needed: optional update evidence extends the existing immutable JSON snapshot; legacy snapshots deserialize to UNKNOWN / NOT_CHECKED.
+架構：既有 Microsoft 簽章 WinGet / 官方 source 驗證與 export JSON 盤點 -> 固定 C# helper 透過 WinGet COM API 查詢 -> 嚴格 JSON / 精確 ID + 版本關聯 -> Rust 版本驗證與正規化 -> 不可變 SQLite scan_assets JSON 快照 -> 型別 IPC -> React 更新優先介面。
 
-Approach: use signed registered Microsoft App Installer, confirm the exact official winget source, then read WinGet list --source winget --disable-interactivity. Microsoft ReportListResult emits installed ID/version and available upgrade version in the list, using the same version selection/pinning engine as upgrade listings. This is safer than any upgrade command. Parse rows by verified exported product IDs and invariant trailing values, never translated headers or display-name matching. UTF-8 and BOM UTF-16 are decoded strictly. Unsupported/truncated/ambiguous rows fail closed. Explicit row with no available version means NO_UPDATE_REPORTED; an absent row is UNKNOWN. Numeric dotted versions must increase for confirmation; unsupported version grammars are UNKNOWN. Query faults preserve Registry and exported inventory.
+helper 以鎖定 NuGet 官方 SDK / CsWinRT 建置，附 self-contained .NET 執行環境；EXE 與配對官方 WinMD 中繼資料嵌入 SafePatch，於每次掃描的自有暫存目錄輸出。無需使用者安裝 .NET、SDK 或 PowerShell 模組。使用已註冊的 Microsoft out-of-process COM 類別，驗證 catalog Id/Name/Type/Argument，再建立僅本地安裝查詢的官方 composite catalog。Connect/Search 失敗、截斷、過大輸出等失敗關閉；未接受來源協議、不修改／刷新來源、不呼叫 install/upgrade/download API。
 
-Source evidence: https://github.com/microsoft/winget-cli/blob/master/src/AppInstallerCLICore/Workflows/WorkflowBase.cpp (ReportListResult). Only official HTTPS catalog and derived winget-pkgs product manifests URLs enter update evidence. Local metadata may be cached; no freshness guarantee or latest/safe claim.
+COM 直接提供 InstalledVersion / IsUpdateAvailable / DefaultInstallVersion / CompareToVersion，名稱与版本為 JSON 字串，不解析人類可讀表格。查詢時間與來源證據保留；catalog 可使用快取，NO_UPDATE_REPORTED 不保證最新。COM 僅提供單一安裝版本，Registry 多重安裝仍獨立保留；未匹配版本 UNKNOWN。Rust 對增加的數字點分版本保守確認，其他 grammar UNKNOWN。
 
-- [ ] Add fixed bounded/cancellable WinGet list runner and independent parser, UTF decoding, failure codes and synthetic PowerShell tests for locale/format/multiple installations/duplicate rows/unavailable/failure/timeout.
-- [ ] Add typed update evidence and NOT_CHECKED vulnerability field, default legacy uncertainty, numeric conservative comparison, reject spoofed sources and exact-version mismatch; Rust negative and snapshot restart tests.
-- [ ] Add update-first homepage, four summary cards, inventory secondary tab, status/source/search filters and evidence/recommendation columns. React tests compare counts and displayed backend evidence and reject unsafe URL rendering.
-- [ ] Add regression steps to Windows CI and adapt native acceptance to both tabs. Update version 0.2.0, Traditional Chinese changelog and verification documentation.
-- [ ] Run available Windows-host tests; push issue-linked PR. Independent review and Windows Actions must pass before merge; package exact verified main EXE/MSI with hashes. Never merge paused Python PR #21. Record any missing device/install verification as NOT_VERIFIED.
+SQLite schema 維持 v3，update / vulnerability_status 擴充不可變 JSON 快照。舊快照 default UNKNOWN / NOT_CHECKED，不重寫歷史。
 
-Review focus: same name different product; mismatched versions between sequential queries; missing or truncated table rows; pinned/multiple-version limitations of WinGet; legacy history must not become safe/current.
+- [x] 固定、bounded / cancellable helper 查詢及 JSON 協定測試：格式／非語系依賴、字串注入、重複衝突、多版本、不可用、API 失敗、逾時。
+- [x] Rust 獨立更新證據、保守版本驗證、來源拒絕、持久化重啟／舊快照測試。
+- [x] 四張摘要卡、更新優先首頁、完整盤點次要頁籤、狀態／搜尋篩選、來源／版本／建議；React 資料一致性及篩選回歸。
+- [x] Windows CI helper build 與 regression gates；native acceptance / installer lifecycle 頁籤與 timeout 修正；0.2.0 metadata / 繁中 CHANGELOG。
+- [ ] 最終 Windows CI、獨立 Review、實際 Rust／native WebView 整合驗證。
+- [ ] 通過 gate 才合併 main，建置／發布 digest 驗證的 Preview EXE／MSI；使用者 Windows 11 安裝實測另列。
+
+審查焦點：相似名稱不同產品、順序查詢版本改變、COM 單版本涵蓋、來源／查詢失敗與來源快取、舊歷史不被視為最新／安全、嵌入 helper 的可信輸出與自有程序清理。Python PR #21 不合併。

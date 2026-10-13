@@ -7,6 +7,10 @@ pub const SCRIPT:&str=include_str!("../adapters/windows_inventory.ps1");
 pub const UPDATE_SCRIPT:&str=include_str!("../adapters/winget_updates.ps1");
 pub const VSCODE_SCRIPT:&str=include_str!("../adapters/vscode_inventory.ps1");
 pub const NODE_SCRIPT:&str=include_str!("../adapters/node_inventory.ps1");
+#[cfg(windows)]
+const UPDATE_METADATA:&[u8]=include_bytes!("../target/winget-helper/Microsoft.Management.Deployment.winmd");
+#[cfg(windows)]
+const UPDATE_HELPER:&[u8]=include_bytes!("../target/winget-helper/SafePatch.WinGetHelper.exe");
 pub const NODE_SCHEDULE:&str=include_str!("../adapters/node_schedule.json");
 const MAX_OUTPUT:u64=8*1024*1024;
 
@@ -51,6 +55,12 @@ pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result
     let exe=powershell()?;
     let modules=exe.parent().ok_or("POWERSHELL_DIRECTORY_FAILED")?.join("Modules");
     let dir=tempfile::tempdir().map_err(|_|"SCAN_TEMP_FAILED")?;
+    #[cfg(windows)]
+    let helper=dir.path().join("SafePatch.WinGetHelper.exe");
+    #[cfg(windows)]
+    std::fs::write(&helper,UPDATE_HELPER).map_err(|_|"SCAN_TEMP_FAILED")?;
+    #[cfg(windows)]
+    std::fs::write(dir.path().join("Microsoft.Management.Deployment.winmd"),UPDATE_METADATA).map_err(|_|"SCAN_TEMP_FAILED")?;
     let cancel_file=dir.path().join("cancel");
     let progress_file=dir.path().join("phase");
     let schedule_file=dir.path().join("node-schedule.json");
@@ -59,6 +69,10 @@ pub fn collect(cancel:Arc<AtomicBool>,progress:impl Fn(u8,&'static str))->Result
     command.args(["-NoLogo","-NoProfile","-NonInteractive","-Command","-"])
         .env("SAFEPATCH_CANCEL_FILE",&cancel_file).env("SAFEPATCH_PROGRESS_FILE",&progress_file).env("SAFEPATCH_NODE_SCHEDULE_FILE",&schedule_file).env("PSModulePath",modules).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
+    #[cfg(windows)] {
+        command.env("SAFEPATCH_WINGET_HELPER",&helper).env("DOTNET_BUNDLE_EXTRACT_BASE_DIR",dir.path().join("dotnet"));
+        for name in ["DOTNET_STARTUP_HOOKS","DOTNET_ADDITIONAL_DEPS","DOTNET_SHARED_STORE","COR_ENABLE_PROFILING","COR_PROFILER","COR_PROFILER_PATH","CORECLR_ENABLE_PROFILING","CORECLR_PROFILER","CORECLR_PROFILER_PATH"] {command.env_remove(name);}
+    }
     let mut child=command.spawn().map_err(|_|"ADAPTER_LAUNCH_FAILED")?;
     // Before supplying any script, contain only our child and its descendants.
     // Handles close on app exit too, preventing orphan WinGet/PowerShell processes.

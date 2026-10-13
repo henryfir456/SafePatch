@@ -7,38 +7,21 @@ function Convert-WinGetBytes([byte[]]$Bytes) {
         return [Text.UTF8Encoding]::new($false,$true).GetString($Bytes).TrimStart([char]0xfeff)
     } catch {throw 'WINGET_UPDATE_ENCODING'}
 }
-function Convert-WinGetUpdateTable([string]$Text, $Records) {
-    $ids=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach($r in $Records){if($r.catalog_source -ceq 'winget'){[void]$ids.Add($r.normalized_id)}}
-    $rows=[Collections.Generic.List[object]]::new()
-    $inTable=$false; $sawTable=$false
-    # Headers, names, footer prose are deliberately never interpreted.
-    $plain=[regex]::Replace($Text,'\x1b\[[0-?]*[ -/]*[@-~]','')
-    foreach($line in ($plain -split '\r?\n')) {
-        if($line.Trim() -match '^-{5,}$'){$inTable=$true;$sawTable=$true;continue}
-        if(-not $inTable){continue}
-        if([string]::IsNullOrWhiteSpace($line)){continue}
-        $parts=@($line.Trim() -split '\s+')
-        if($parts.Length -gt 0 -and $parts[-1] -ceq 'winget'){$parts=@($parts[0..($parts.Length-2)])}
-        $positions=[Collections.Generic.List[int]]::new();$structural=[Collections.Generic.List[int]]::new()
-        for($i=1;$i -lt $parts.Length;$i++){
-            if(($parts.Length-$i -eq 2 -or $parts.Length-$i -eq 3) -and $parts[$i] -match '^[A-Za-z0-9][A-Za-z0-9._+-]*\.[A-Za-z0-9._+-]+(?:\u2026)?$' -and $parts[$i] -match '[A-Za-z]'){$structural.Add($i);if($ids.Contains($parts[$i])){$positions.Add($i)}}
-        }
-        if($positions.Count -ne 1){
-            # Fixed-width data rows have padding; reject changed/truncated IDs.
-            if($structural.Count -ge 1 -and $positions.Count -eq 0){continue}
-            if($line -match '^\d+\s+[^\s]+(?: [^\s]+)*$'){continue}
-            throw 'WINGET_UPDATE_FORMAT'
-        }
-        $at=$positions[0]
-        $current=$parts[$at+1]
-        $target=if($parts.Length-$at -eq 3){$parts[$at+2]}else{$null}
-        if($current.Length -gt 128 -or ($null -ne $target -and $target.Length -gt 128)){throw 'WINGET_UPDATE_FORMAT'}
-        $rows.Add([pscustomobject]@{display_name=($parts[0..($at-1)] -join ' ');package_id=$parts[$at];installed_version=$current;target_version=$target})
-        if($rows.Count -gt 20000){throw 'WINGET_UPDATE_LIMIT'}
+function Convert-WinGetUpdateDocument($Document) {
+    if($null -eq $Document -or $null -eq $Document.PSObject.Properties['schema'] -or $Document.schema -ne 1 -or $null -eq $Document.PSObject.Properties['status'] -or $null -eq $Document.PSObject.Properties['rows']){throw 'WINGET_UPDATE_FORMAT'}
+    if($Document.status -ceq 'ERROR'){
+        $code=if($null -ne $Document.PSObject.Properties['code']){[string]$Document.code}else{''}
+        if($code -notmatch '^WINGET_UPDATE_[A-Z_]+$'){$code='WINGET_UPDATE_QUERY_FAILED'}
+        throw $code
     }
-    if(-not $sawTable -or $rows.Count -eq 0){throw 'WINGET_UPDATE_FORMAT'}
-    return @($rows)
+    if($Document.status -cne 'COMPLETE' -or $Document.rows -isnot [array] -or $Document.rows.Count -gt 20000){throw 'WINGET_UPDATE_FORMAT'}
+    foreach($row in $Document.rows){
+        foreach($field in @('display_name','package_id','installed_version','target_version','update_available')){if($null -eq $row.PSObject.Properties[$field]){throw 'WINGET_UPDATE_FORMAT'}}
+        if($row.package_id -isnot [string] -or $row.package_id -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$' -or $row.installed_version -isnot [string] -or $row.installed_version.Length -gt 128 -or $row.display_name -isnot [string] -or $row.display_name.Length -gt 1024 -or $row.update_available -isnot [bool]){throw 'WINGET_UPDATE_FORMAT'}
+        if($row.update_available -and ($row.target_version -isnot [string] -or [string]::IsNullOrWhiteSpace($row.target_version) -or $row.target_version.Length -gt 128)){throw 'WINGET_UPDATE_FORMAT'}
+        if(-not $row.update_available -and $null -ne $row.target_version){throw 'WINGET_UPDATE_FORMAT'}
+    }
+    return @($Document.rows)
 }
 function Invoke-WinGetUpdateProcess([string]$Executable,[int]$TimeoutMilliseconds=45000) {
     $process=[Diagnostics.Process]::new();$started=$false;$outFile=$null;$errFile=$null;$output=$null;$errors=$null
@@ -48,8 +31,8 @@ function Invoke-WinGetUpdateProcess([string]$Executable,[int]$TimeoutMillisecond
         $output=[IO.File]::Open($outFile,[IO.FileMode]::CreateNew,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Read)
         $errors=[IO.File]::Open($errFile,[IO.FileMode]::CreateNew,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Read)
         $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$Executable
-        # list emits available upgrades using WinGet's version/pin evaluator; never installs.
-        $info.Arguments='list --source winget --disable-interactivity'
+        # Product-owned typed COM helper. Never execute discovered binary paths.
+        $info.Arguments='query'
         $info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
         $process.StartInfo=$info;[void]$process.Start();$started=$true
         $outTask=$process.StandardOutput.BaseStream.CopyToAsync($output)
@@ -89,7 +72,10 @@ function Set-WinGetUpdateEvidence($Records,$Rows,[string]$Failure) {
 }
 function Get-WinGetUpdates([string]$Executable,$Records) {
     try {
-        $rows=@(Convert-WinGetUpdateTable (Invoke-WinGetUpdateProcess $Executable) $Records)
+        if(-not $env:SAFEPATCH_WINGET_HELPER -or -not [IO.File]::Exists($env:SAFEPATCH_WINGET_HELPER)){throw 'WINGET_UPDATE_HELPER_UNAVAILABLE'}
+        $json=Invoke-WinGetUpdateProcess $env:SAFEPATCH_WINGET_HELPER
+        try{$document=$json|ConvertFrom-Json}catch{throw 'WINGET_UPDATE_FORMAT'}
+        $rows=@(Convert-WinGetUpdateDocument $document)
         Set-WinGetUpdateEvidence $Records $rows $null
         return [pscustomobject]@{scanner='winget-updates';status='PARTIAL';count=@($Records|Where-Object {$_.update.status -eq 'UPDATE_AVAILABLE'}).Count;codes=@('CATALOG_MAY_BE_CACHED','PIN_AND_VERSION_COVERAGE_LIMITED')}
     } catch {

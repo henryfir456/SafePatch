@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 if(process.platform!=='win32')throw new Error('Windows required');
 const script=['winget_updates','node_inventory','vscode_inventory','windows_inventory'].map(name=>readFileSync(new URL(`../src-tauri/adapters/${name}.ps1`,import.meta.url),'utf8').replaceAll('\r\n','\n')).join('\n')+'\nexit\n';
-const child=spawn(join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoLogo','-NoProfile','-NonInteractive','-Command','-'],{windowsHide:true,env:{...process.env,SAFEPATCH_NODE_SCHEDULE_FILE:fileURLToPath(new URL('../src-tauri/adapters/node_schedule.json',import.meta.url))},stdio:['pipe','pipe','pipe']});
+const child=spawn(join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoLogo','-NoProfile','-NonInteractive','-Command','-'],{windowsHide:true,env:{...process.env,SAFEPATCH_WINGET_HELPER:fileURLToPath(new URL('../src-tauri/target/winget-helper/SafePatch.WinGetHelper.exe',import.meta.url)),SAFEPATCH_NODE_SCHEDULE_FILE:fileURLToPath(new URL('../src-tauri/adapters/node_schedule.json',import.meta.url))},stdio:['pipe','pipe','pipe']});
 const chunks=[];let length=0;let errorBytes=0;
 child.stdout.on('data',chunk=>{length+=chunk.length;if(length>8*1024*1024){child.kill();throw new Error('Adapter output limit');}chunks.push(chunk);});
 child.stderr.on('data',chunk=>{errorBytes+=chunk.length;});
