@@ -27,3 +27,9 @@ SQLite schema 維持 v3；不可變 JSON 快照新增 update 與 vulnerability_s
 - 最終 production EXE／MSI 尚未安裝，Rust / native UI 整合驗證待取得本次 compiled artifact。不能以 PowerShell 合成測試或舊 0.1.0 證據代替。
 - 使用者 Windows 11 安裝、實際已知更新產品的版本／來源核對、取消、再掃描、重啟、移除仍需正式包交付後驗收。
 - Windows 10、其他架構、非數字版本 grammar、非 WinGet 目錄軟體均不保證更新涵蓋。
+
+## 獨立 Review（最終 CI 仍待確認）
+
+review_typed 已重新檢查 P1 修正：explicit CLSCTX_LOCAL_SERVER、Microsoft server 簽章／packaged 登錄、使用者 override 拒絕、清除繼承 marker，並以非管理員 Windows 11 重新執行 adapter／regression，認定啟用邊界已修正、沒有新 blocker。Review 實際查詢為 41 個產品、18 個更新候選；16 項 renderer 通過。
+
+發布流程另經獨立 Review、PowerShell parse 0 errors；它只在明確推送 v0.2.0-preview tag 後取用同一 main commit 的成功 CI 產物，驗證 archive digest、八檔清單／雜湊／manifest，先建 draft，上傳後重新下載比對，再確認 main／tag 未變才發布。不執行下載的安裝包，不上傳私人盤點。發布尚未執行。
