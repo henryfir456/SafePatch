@@ -1,5 +1,7 @@
 # SafePatch
 
+v0.3.0 Preview **development, not yet released** (#28/#29): opt-in OSV/NVD/KEV security assessment with independent applicability/priority, evidence details, UNKNOWN dimensions and embedded application version/build identity. [Actual verification and limits](docs/SECURITY_HEALTH_VERIFICATION.md). Lockfile declarations never prove installation; controlled Windows product mappings do not establish installation origin. Draft PRs #30/#31 require CI, independent review and real Windows evidence before delivery. Python PR #21 remains paused.
+
 Local-first Windows software update health and developer-environment inventory.
 
 v0.2.0 Preview development (Issue #26) adds read-only WinGet update evidence and an update-first dashboard. See [update semantics and actual verification](docs/UPDATE_HEALTH_VERIFICATION.md) and [繁體中文 CHANGELOG](CHANGELOG.md). Vulnerabilities remain NOT_CHECKED; NO_UPDATE_REPORTED does not guarantee latest.

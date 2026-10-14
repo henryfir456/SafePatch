@@ -37,7 +37,7 @@ impl ScanService {
                 if assets.is_empty() {
                     return Err("SECURITY_INVENTORY_REQUIRED".into());
                 }
-                Ok((id, assets))
+                Ok::<_, String>((id, assets))
             })
             .transpose()?;
         let npm = npm_scan_id

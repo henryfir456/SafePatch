@@ -140,7 +140,6 @@ struct Client<'a> {
     cancel: Arc<AtomicBool>,
     started: Instant,
     requests: usize,
-    memory: BTreeMap<String, (Value, SourceCheck)>,
 }
 impl<'a> Client<'a> {
     fn new(db: &'a rusqlite::Connection, cancel: Arc<AtomicBool>) -> Result<Self, String> {
@@ -158,16 +157,12 @@ impl<'a> Client<'a> {
             cancel,
             started: Instant::now(),
             requests: 0,
-            memory: BTreeMap::new(),
         })
     }
     async fn query(&mut self, q: Query) -> Result<(Value, SourceCheck), String> {
         cancelled(&self.cancel)?;
         let key = q.key();
         let source = q.source();
-        if let Some(value) = self.memory.get(&key) {
-            return Ok(value.clone());
-        }
         let cached: Option<(String, String)> = self
             .db
             .query_row(
@@ -188,7 +183,6 @@ impl<'a> Client<'a> {
                         reason: None,
                         cache: "FRESH".into(),
                     };
-                    self.memory.insert(key, (data.clone(), check.clone()));
                     return Ok((data, check));
                 }
             }
@@ -238,15 +232,12 @@ impl<'a> Client<'a> {
             reason: None,
             cache: cache_status.into(),
         };
-        self.memory.insert(key, (data.clone(), check.clone()));
         Ok((data, check))
     }
 }
 fn failure(item: &mut SecurityItem, source: &str, code: &str) {
     item.reasons.push(
-        if code == "COVERAGE_PARTIAL" {
-            code
-        } else if code == "VERSION_UNRESOLVED" {
+        if matches!(code, "COVERAGE_PARTIAL" | "VERSION_UNRESOLVED") {
             code
         } else {
             "QUERY_FAILED"
@@ -557,7 +548,6 @@ mod tests {
             [],
         )
         .unwrap();
-        c.memory.clear();
         assert_eq!(c.query(q()).await.unwrap_err(), "COVERAGE_PARTIAL");
     }
     #[test]

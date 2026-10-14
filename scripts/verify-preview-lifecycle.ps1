@@ -50,7 +50,7 @@ try {
   $end=[DateTime]::UtcNow.AddSeconds(25);while(-not(Control $root '開始唯讀掃描')){if([DateTime]::UtcNow -gt $end){throw 'PREVIEW_UIA_PROVIDER_UNAVAILABLE'};Start-Sleep -Milliseconds 100}
   $uiaEstablished=$true
   Click $root '開始唯讀掃描';$s=Wait-Stats 'windows' @('COMPLETE','PARTIAL')
-  if($s.schema -ne 3 -or $s.fk_errors -ne 0 -or $s.assets -le 0){throw 'PREVIEW_WINDOWS_SNAPSHOT_INVALID'}
+  if($s.schema -ne 4 -or $s.fk_errors -ne 0 -or $s.assets -le 0){throw 'PREVIEW_WINDOWS_SNAPSHOT_INVALID'}
   $report.windows_scan='PASS';$report.assets=$s.assets;$scanId=$s.windows.id
   Click $root '開始唯讀掃描';Click $root '取消掃描';$cancel=Wait-Stats 'windows' @('CANCELLED')
   $report.cancel='PASS'
