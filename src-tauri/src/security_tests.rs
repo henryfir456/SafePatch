@@ -10,6 +10,33 @@ fn product() -> Product {
     PRODUCTS[2]
 }
 #[test]
+fn malformed_negation_never_confirms_applicability() {
+    for value in [json!("true"), json!(1), json!(null), json!({})] {
+        for level in ["config", "node"] {
+            let mut v = nvd();
+            if level == "config" {
+                v["vulnerabilities"][0]["cve"]["configurations"][0]["negate"] = value.clone();
+            } else {
+                v["vulnerabilities"][0]["cve"]["configurations"][0]["nodes"][0]["negate"] =
+                    value.clone();
+            }
+            let mut findings = parse_nvd(&v, product(), "24.06", "now").unwrap().0;
+            assert_eq!(findings[0].applicability, Applicability::Potential);
+            let catalog = json!({"count":1,"vulnerabilities":[{"cveID":"CVE-2024-1234","dateAdded":"2024-01-01","dueDate":"2024-02-01","requiredAction":"Apply updates"}]});
+            apply_kev(&mut findings, &catalog, "now").unwrap();
+            assert_eq!(findings[0].priority, Priority::Undetermined);
+        }
+    }
+}
+#[test]
+fn malformed_kev_is_not_a_negative_catalog() {
+    let mut findings = parse_nvd(&nvd(), product(), "24.06", "now").unwrap().0;
+    let catalog = json!({"count":1,"vulnerabilities":[{"cveID":"not-a-CVE","dateAdded":"2024-01-01","dueDate":"2024-02-01","requiredAction":"Apply updates"}]});
+    assert!(apply_kev(&mut findings, &catalog, "now").is_err());
+    assert_eq!(findings[0].kev_status, "NOT_CHECKED");
+    assert!(findings[0].kev.is_none());
+}
+#[test]
 fn nvd_negated_ranges_cannot_prove_not_affected() {
     for key in ["config", "node"] {
         let mut v = nvd();

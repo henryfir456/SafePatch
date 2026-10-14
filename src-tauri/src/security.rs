@@ -495,10 +495,14 @@ pub fn parse_nvd(
             for node in nodes {
                 let matches = arr(&node["cpeMatch"]);
                 let simple = nodes.len() == 1
-                    && config["negate"] != true
+                    && config
+                        .get("negate")
+                        .is_none_or(|v| v.as_bool() == Some(false))
                     && (config.get("operator").is_none() || config["operator"] == "OR")
                     && node["operator"] == "OR"
-                    && node["negate"] != true
+                    && node
+                        .get("negate")
+                        .is_none_or(|v| v.as_bool() == Some(false))
                     && node
                         .get("children")
                         .is_none_or(|v| v.as_array().is_some_and(|a| a.is_empty()))
