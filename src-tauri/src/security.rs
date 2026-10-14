@@ -155,6 +155,11 @@ fn osv_range(range: &Value, version: &semver::Version) -> Option<(bool, Vec<Stri
     if events.is_empty() || events.len() > 256 {
         return None;
     }
+    if events.iter().any(|e| e.get("fixed").is_some())
+        && events.iter().any(|e| e.get("last_affected").is_some())
+    {
+        return None;
+    }
     let mut start: Option<Option<semver::Version>> = None;
     let mut matched = false;
     let mut fixes = vec![];
@@ -167,6 +172,9 @@ fn osv_range(range: &Value, version: &semver::Version) -> Option<(bool, Vec<Stri
         let (key, raw) = obj.iter().next()?;
         let s = raw.as_str()?;
         let bound = if key == "introduced" && s == "0" {
+            if previous.is_some() {
+                return None;
+            }
             None
         } else {
             Some(semver::Version::parse(s).ok()?)

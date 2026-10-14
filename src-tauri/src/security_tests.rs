@@ -1,7 +1,7 @@
 use crate::security::*;
 use serde_json::{json, Value};
 fn osv() -> Value {
-    json!({"vulns":[{"id":"GHSA-test-1234-5678","aliases":["CVE-2024-1234","CVE-2024-1234"],"database_specific":{"severity":"HIGH"},"affected":[{"package":{"ecosystem":"npm","name":"example"},"ranges":[{"type":"SEMVER","events":[{"introduced":"1.0.0"},{"fixed":"1.2.0"},{"introduced":"2.0.0"},{"last_affected":"2.0.3"}]}]}],"references":[{"url":"javascript:alert(1)"},{"url":"https://example.org/advisory"}]}]})
+    json!({"vulns":[{"id":"GHSA-test-1234-5678","aliases":["CVE-2024-1234","CVE-2024-1234"],"database_specific":{"severity":"HIGH"},"affected":[{"package":{"ecosystem":"npm","name":"example"},"ranges":[{"type":"SEMVER","events":[{"introduced":"1.0.0"},{"fixed":"1.2.0"}]},{"type":"SEMVER","events":[{"introduced":"2.0.0"},{"last_affected":"2.0.3"}]}]}],"references":[{"url":"javascript:alert(1)"},{"url":"https://example.org/advisory"}]}]})
 }
 fn nvd() -> Value {
     json!({"totalResults":1,"startIndex":0,"vulnerabilities":[{"cve":{"id":"CVE-2024-1234","vulnStatus":"Analyzed","configurations":[{"nodes":[{"operator":"OR","cpeMatch":[{"vulnerable":true,"criteria":"cpe:2.3:a:7-zip:7-zip:*:*:*:*:*:*:*:*","versionStartIncluding":"23.0","versionEndExcluding":"24.07"}]}]}],"metrics":{"cvssMetricV31":[{"type":"Primary","source":"nvd@nist.gov","cvssData":{"baseScore":9.8,"baseSeverity":"CRITICAL","vectorString":"CVSS:3.1/AV:N"}}]},"references":[{"url":"https://www.7-zip.org/"}]}}]})

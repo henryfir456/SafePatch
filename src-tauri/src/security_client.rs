@@ -148,7 +148,7 @@ impl<'a> Client<'a> {
             http: reqwest::Client::builder()
                 .https_only(true)
                 .redirect(reqwest::redirect::Policy::none())
-                .retry(reqwest::retry::Policy::never())
+                .retry(reqwest::retry::never())
                 .no_proxy()
                 .connect_timeout(Duration::from_secs(8))
                 .timeout(Duration::from_secs(20))
@@ -522,7 +522,7 @@ mod tests {
     async fn http_failure_redirect_and_rate_limit_remain_unknown() {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::Policy::never())
+            .retry(reqwest::retry::never())
             .no_proxy()
             .build()
             .unwrap();
