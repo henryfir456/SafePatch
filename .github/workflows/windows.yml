@@ -28,6 +28,8 @@ jobs:
         run: npm test
       - name: SQLite schema regression tests
         run: npm run test:schema
+      - name: Embedded version consistency and negative contracts
+        run: npm run test:version
       - name: PowerShell adapter regression tests
         shell: powershell
         run: ./scripts/test-adapter.ps1

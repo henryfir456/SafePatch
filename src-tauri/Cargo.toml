@@ -1,6 +1,6 @@
 [package]
 name = "safepatch"
-version = "0.2.0"
+version = "0.3.0-preview"
 edition = "2021"
 default-run = "safepatch"
 
@@ -13,6 +13,7 @@ desktop = ["dep:tauri", "dep:tauri-build"]
 acceptance = ["desktop", "tauri/custom-protocol"]
 
 [build-dependencies]
+serde_json = "1"
 tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]

@@ -1,6 +1,6 @@
 {
   "name": "safepatch",
-  "version": "0.2.0",
+  "version": "0.3.0-preview",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run --pool=threads --maxWorkers=1 --no-file-parallelism",
     "test:schema": "node --test tests/schema.test.mjs",
+    "test:version": "node --test tests/version.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
