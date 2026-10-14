@@ -238,6 +238,11 @@ impl<'a> Client<'a> {
     }
 }
 fn failure(item: &mut SecurityItem, source: &str, code: &str) {
+    if source == "CISA_KEV" {
+        for finding in &mut item.findings {
+            finding.kev_status = "UNKNOWN".into();
+        }
+    }
     item.reasons.push(
         if matches!(code, "COVERAGE_PARTIAL" | "VERSION_UNRESOLVED") {
             code

@@ -10,6 +10,19 @@ fn product() -> Product {
     PRODUCTS[2]
 }
 #[test]
+fn mixed_osv_fix_last_affected_and_repeated_zero_are_untrusted() {
+    for events in [
+        json!([{"introduced":"1.0.0"},{"fixed":"1.2.0"},{"introduced":"2.0.0"},{"last_affected":"2.0.3"}]),
+        json!([{"introduced":"0"},{"fixed":"1.2.0"},{"introduced":"0"}]),
+    ] {
+        let mut v = osv();
+        v["vulns"][0]["affected"][0]["ranges"] = json!([{"type":"SEMVER","events":events}]);
+        let findings = parse_osv(&v, "example", "1.1.0", true, "now").unwrap();
+        assert_eq!(findings[0].applicability, Applicability::Potential);
+        assert!(findings[0].fixed_versions.is_empty());
+    }
+}
+#[test]
 fn na_qualifiers_need_observed_evidence_instead_of_wildcard_matching() {
     for index in 6..13 {
         let mut v = nvd();
