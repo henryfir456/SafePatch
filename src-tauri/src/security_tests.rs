@@ -10,6 +10,27 @@ fn product() -> Product {
     PRODUCTS[2]
 }
 #[test]
+fn na_qualifiers_need_observed_evidence_instead_of_wildcard_matching() {
+    for index in 6..13 {
+        let mut v = nvd();
+        let mut fields: Vec<_> = "cpe:2.3:a:7-zip:7-zip:*:*:*:*:*:*:*:*".split(':').collect();
+        fields[index] = "-";
+        v["vulnerabilities"][0]["cve"]["configurations"][0]["nodes"][0]["cpeMatch"][0]
+            ["criteria"] = json!(fields.join(":"));
+        assert_eq!(
+            parse_nvd(&v, product(), "24.06", "now").unwrap().0[0].applicability,
+            Applicability::Potential
+        );
+    }
+    let mut v = nvd();
+    v["vulnerabilities"][0]["cve"]["configurations"][0]["nodes"][0]["cpeMatch"][0]["criteria"] =
+        json!("cpe:2.3:a:7-zip:7-zip:*:*:*:*:*:windows:*:*");
+    assert_eq!(
+        parse_nvd(&v, product(), "24.06", "now").unwrap().0[0].applicability,
+        Applicability::Matched
+    );
+}
+#[test]
 fn malformed_negation_never_confirms_applicability() {
     for value in [json!("true"), json!(1), json!(null), json!({})] {
         for level in ["config", "node"] {

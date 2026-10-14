@@ -455,9 +455,10 @@ fn cpe_app(m: &Value, p: Product, version: &str) -> Option<Applicability> {
         result = Applicability::Potential
     }
     // Update/edition/language/target_hw/other conditions or extension-specific target_sw cannot confirm the desktop product.
-    if c[6..10].iter().any(|s| !matches!(*s, "*" | "-"))
-        || !matches!(c[10], "*" | "-" | "windows")
-        || c[11..].iter().any(|s| !matches!(*s, "*" | "-"))
+    // CPE '-' means NA, not ANY. Inventory does not prove these qualifiers NA.
+    if c[6..10].iter().any(|s| *s != "*")
+        || !matches!(c[10], "*" | "windows")
+        || c[11..].iter().any(|s| *s != "*")
     {
         result = Applicability::Potential
     }
