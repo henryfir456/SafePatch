@@ -54,6 +54,7 @@ try {
   $report.windows_scan='PASS';$report.assets=$s.assets;$scanId=$s.windows.id
   Click $root '開始唯讀掃描';Click $root '取消掃描';$cancel=Wait-Stats 'windows' @('CANCELLED')
   $report.cancel='PASS'
+  Click $root '完整軟體清單'
   # Npm declaration inventory uses this public, owned checkout's existing lockfile.
   $edit=Control $root 'npm project directory'
   if(-not $edit){throw 'PREVIEW_UIA_CONTROL_UNAVAILABLE'}
@@ -65,6 +66,7 @@ try {
   $report.npm_scan='PASS';$report.packages=$n.packages;$report.edges=$n.edges;$npmId=$n.npm.id
   Close-Own $exeApp;$exeApp=$null
   $msiApp=Start-Process -FilePath (Join-Path $msiDir 'safepatch.exe') -PassThru;$root=App-Root $msiApp
+  Click $root '完整軟體清單'
   $end=[DateTime]::UtcNow.AddSeconds(25);while(-not(Control $root 'npm: PARTIAL')){if([DateTime]::UtcNow -gt $end){throw 'PREVIEW_UIA_RESTORED_RESULT_UNAVAILABLE'};Start-Sleep -Milliseconds 100}
   $reopened=Read-Stats
   if($reopened.npm.id -ne $npmId -or $reopened.windows.status -ne 'CANCELLED' -or $reopened.packages -ne $n.packages){throw 'PREVIEW_RESTART_MISMATCH'}

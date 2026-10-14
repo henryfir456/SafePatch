@@ -75,6 +75,16 @@ pub fn assets(db:&Connection,id:&str)->Result<Vec<Asset>,String>{
     let mut result=Vec::new();for row in rows{result.push(serde_json::from_str(&row.map_err(|_|"DATABASE_READ_FAILED")?).map_err(|_|"DATABASE_CORRUPT")?);}Ok(result)
 }
 #[cfg(test)] mod tests {
+    #[test]fn update_evidence_survives_restart_and_legacy_snapshots_remain_unknown(){
+        let directory=tempfile::tempdir().unwrap();let path=directory.path().join("updates.sqlite");
+        let raw=serde_json::json!({"records":[{"display_name":"Product","publisher":null,"installed_version":"1.0","normalized_id":"Vendor.Product","install_path_hash":null,"installation_source":"UNKNOWN","scanner":"winget","source_id":"a".repeat(64),"scope":"unknown","view":"catalog","catalog_source":"winget","update":{"status":"UPDATE_AVAILABLE","target_version":"2.0","package_id":"Vendor.Product","source_url":crate::updates::SOURCE,"checked_at":"2026-10-13T05:00:00Z","reason":"WINGET_EXACT_ID_VERSION"}}],"coverage":[]});
+        let assets=crate::model::normalize(serde_json::from_value(raw).unwrap(),"2026-10-13T05:00:00Z").unwrap().0;
+        let run=crate::model::Scan{id:"updates".into(),status:"PARTIAL".into(),phase:"finished".into(),progress:100,started_at:"2026-10-13T05:00:00Z".into(),finished_at:Some("2026-10-13T05:00:01Z".into()),coverage:vec![],error_code:None};
+        {let mut db=super::open(&path).unwrap();super::insert_scan(&db,&run).unwrap();super::finish(&mut db,&run,&assets).unwrap();}
+        let db=super::open(&path).unwrap();let restored=super::assets(&db,"updates").unwrap();assert_eq!(restored[0].update.status,"UPDATE_AVAILABLE");assert_eq!(restored[0].update.target_version.as_deref(),Some("2.0"));assert_eq!(restored[0].vulnerability_status,"NOT_CHECKED");
+        let mut legacy=serde_json::to_value(&restored[0]).unwrap();legacy.as_object_mut().unwrap().remove("update");legacy.as_object_mut().unwrap().remove("vulnerability_status");let legacy:crate::model::Asset=serde_json::from_value(legacy).unwrap();assert_eq!(legacy.update.status,"UNKNOWN");assert_eq!(legacy.vulnerability_status,"NOT_CHECKED");
+    }
+
     use super::*;
     #[test]fn migration_is_idempotent_and_rejects_future_schema(){let mut d=Connection::open_in_memory().unwrap();d.execute_batch("PRAGMA foreign_keys=ON").unwrap();migrate(&mut d).unwrap();migrate(&mut d).unwrap();assert_eq!(d.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),3);d.pragma_update(None,"user_version",99).unwrap();assert!(migrate(&mut d).is_err());}
     #[test]fn history_survives_restart_and_interrupted_runs_are_explicit(){let dir=tempfile::tempdir().unwrap();let path=dir.path().join("test.sqlite");{let d=open(&path).unwrap();for i in 0..30{let s=Scan{id:i.to_string(),status:"RUNNING".into(),phase:"queued".into(),progress:0,started_at:i.to_string(),finished_at:None,coverage:vec![],error_code:None};insert_scan(&d,&s).unwrap();}}let d=open(&path).unwrap();assert_eq!(interrupt(&d).unwrap(),30);assert_eq!(scan(&d,Some("0")).unwrap().unwrap().status,"INTERRUPTED");assert_eq!(d.query_row("SELECT count(*) FROM scan_runs",[],|r|r.get::<_,i64>(0)).unwrap(),30);}

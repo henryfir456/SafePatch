@@ -8,6 +8,9 @@ pub struct Acceptance {pub mode:String,pub directory:PathBuf,pub project_root:Op
 #[serde(deny_unknown_fields)]
 pub struct Report {
     mode:String,scan_id:Option<String>,asset_count:usize,rendered_rows:usize,
+    #[serde(default)] update_count:usize,
+    #[serde(default)] rendered_updates:usize,
+    #[serde(default)] unknown_update_count:usize,
     versioned_count:usize,rendered_versions:usize,cancellation:bool,passed:bool,error_code:Option<String>,
 }
 #[tauri::command]
@@ -35,6 +38,9 @@ pub fn acceptance_report(app:tauri::AppHandle,state:tauri::State<'_,Acceptance>,
         let assets=service.assets(id)?;
         let versioned=assets.iter().filter(|a|a.installed_version.is_some()).count();
         report.passed &= report.mode==state.mode && !assets.is_empty() && report.asset_count==assets.len() && report.rendered_rows==assets.len() && report.versioned_count==versioned && report.rendered_versions==versioned;
+        let updates=assets.iter().filter(|a|a.update.status=="UPDATE_AVAILABLE").count();
+        let unknown=assets.iter().filter(|a|matches!(a.update.status.as_str(),"UNKNOWN"|"ERROR")).count();
+        report.passed &= report.update_count==updates && report.rendered_updates==updates && report.unknown_update_count==unknown;
         if state.mode=="restart" {
             let previous:Report=serde_json::from_slice(&std::fs::read(&path).map_err(|_|"ACCEPTANCE_PREVIOUS_MISSING")?).map_err(|_|"ACCEPTANCE_PREVIOUS_INVALID")?;
             report.passed &= previous.passed && previous.cancellation && previous.scan_id==report.scan_id && previous.asset_count==report.asset_count;
@@ -53,6 +59,6 @@ pub fn configure(app:&mut tauri::App)->Result<(),Box<dyn std::error::Error>>{
     let window=app.get_webview_window("main").ok_or("missing main window")?;
     window.hide()?;
     let handle=app.handle().clone();
-    std::thread::spawn(move||{std::thread::sleep(std::time::Duration::from_secs(200));handle.exit(2);});
+    std::thread::spawn(move||{std::thread::sleep(std::time::Duration::from_secs(450));handle.exit(2);});
     Ok(())
 }

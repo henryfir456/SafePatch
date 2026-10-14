@@ -5,6 +5,7 @@
   const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent===text);
   const start=()=>button('開始 npm 唯讀掃描');
   try{
+    await wait(()=>button('完整軟體清單'));button('完整軟體清單').click();
     const mode=await invoke('acceptance_mode');let cancellation=false;
     if(mode==='npm-scan'){
       await wait(()=>document.querySelector('[aria-label="npm project directory"]'));

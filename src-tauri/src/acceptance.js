@@ -2,7 +2,7 @@
 // No fixtures, device data uploads, external scripts, or discovered binaries.
 (async()=>{
   const invoke=window.__TAURI_INTERNALS__.invoke;
-  const wait=async predicate=>{const deadline=Date.now()+160000;while(Date.now()<deadline){if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw Error('ACCEPTANCE_TIMEOUT');};
+  const wait=async predicate=>{const deadline=Date.now()+210000;while(Date.now()<deadline){if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw Error('ACCEPTANCE_TIMEOUT');};
   const buttons=()=>[...document.querySelectorAll('button')];
   const start=()=>buttons().find(b=>b.textContent==='開始唯讀掃描');
   try{
@@ -23,8 +23,16 @@
     if(!s||!['PARTIAL','COMPLETE'].includes(s.status))throw Error('ACCEPTANCE_SCAN_FAILED');
     const assets=await invoke('list_assets',{scanId:s.id});
     if(!assets.length)throw Error('ACCEPTANCE_NO_ASSETS');
-    await wait(()=>document.querySelectorAll('tbody tr').length===assets.length);
-    const rows=[...document.querySelectorAll('tbody tr')];
+    const updateAssets=assets.filter(a=>a.update?.status==='UPDATE_AVAILABLE');
+    const available=updateAssets.length;
+    const unknown=assets.filter(a=>['UNKNOWN','ERROR'].includes(a.update?.status??'UNKNOWN')).length;
+    await wait(()=>document.querySelector('[data-testid=update-count]')?.textContent===String(available) && document.querySelector('[data-testid=unknown-count]')?.textContent===String(unknown));
+    const updateRows=[...document.querySelectorAll('section:not([hidden]) tbody tr')];
+    if(updateRows.length!==available || updateRows.some((r,i)=>r.cells[0].querySelector('b').textContent!==updateAssets[i].display_name || r.cells[1].textContent!==updateAssets[i].installed_version || r.cells[2].textContent!==updateAssets[i].update.target_version || !r.cells[3].textContent.includes('UPDATE_AVAILABLE') || !r.cells[4].textContent.includes(updateAssets[i].update.source_url) || !r.cells[4].textContent.includes(updateAssets[i].update.package_id)))throw Error('ACCEPTANCE_UPDATE_RENDER_FAILED');
+    if(document.querySelector('[data-testid=unknown-count]')?.textContent!==String(unknown))throw Error('ACCEPTANCE_UPDATE_SUMMARY_FAILED');
+    buttons().find(b=>b.textContent==='完整軟體清單').click();
+    await wait(()=>document.querySelectorAll('section:not([hidden]) tbody tr').length===assets.length);
+    const rows=[...document.querySelectorAll('section:not([hidden]) tbody tr')];
     const versioned=assets.filter(a=>a.installed_version!==null).length;
     const renderedVersions=rows.filter(r=>r.cells[1].textContent!=='UNKNOWN').length;
     if(versioned!==renderedVersions)throw Error('ACCEPTANCE_VERSION_RENDER_FAILED');
@@ -33,7 +41,7 @@
     if(rows.some((r,i)=>assets[i].support&&!r.cells[4].textContent.includes('support: '+assets[i].support.status)))throw Error('ACCEPTANCE_SUPPORT_RENDER_FAILED');
     if(!document.body.textContent.includes('UNKNOWN ≠ 安全'))throw Error('ACCEPTANCE_UNKNOWN_LABEL_FAILED');
     if(s.coverage.some(c=>c.status!=='COMPLETE')&&!document.body.textContent.includes('PARTIAL'))throw Error('ACCEPTANCE_COVERAGE_RENDER_FAILED');
-    await invoke('acceptance_report',{report:{mode,scan_id:s.id,asset_count:assets.length,rendered_rows:rows.length,versioned_count:versioned,rendered_versions:renderedVersions,cancellation,passed:true,error_code:null}});
+    await invoke('acceptance_report',{report:{mode,scan_id:s.id,asset_count:assets.length,update_count:available,rendered_updates:updateRows.length,unknown_update_count:unknown,rendered_rows:rows.length,versioned_count:versioned,rendered_versions:renderedVersions,cancellation,passed:true,error_code:null}});
   }catch(error){
     const code=/^ACCEPTANCE_[A-Z_]+$/.test(error?.message??'')?error.message:'DESKTOP_ACCEPTANCE_FAILED';
     await invoke('acceptance_report',{report:{mode:'failed',scan_id:null,asset_count:0,rendered_rows:0,versioned_count:0,rendered_versions:0,cancellation:false,passed:false,error_code:code}});

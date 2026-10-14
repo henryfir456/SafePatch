@@ -31,6 +31,9 @@ jobs:
       - name: PowerShell adapter regression tests
         shell: powershell
         run: ./scripts/test-adapter.ps1
+      - name: WinGet update evidence and bounded query regression tests
+        shell: powershell
+        run: ./scripts/test-winget-updates.ps1
       - name: Reject inherited PowerShell module hijacking
         run: node scripts/test-module-path.mjs
       - name: VS Code read-only metadata regression tests
@@ -54,6 +57,11 @@ jobs:
       - name: Real Windows Installer table reader preflight (metadata fixture only)
         shell: pwsh
         run: ./scripts/test-preview-msi.ps1
+      - name: Build pinned self-contained typed WinGet helper
+        shell: pwsh
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1
+        run: ./scripts/build-winget-helper.ps1
       - name: Rust unit tests and migrations
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
       - name: Rust static analysis

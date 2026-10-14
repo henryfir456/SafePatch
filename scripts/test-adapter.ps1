@@ -1,5 +1,6 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../src-tauri/adapters/windows_inventory.ps1')
+. (Join-Path $PSScriptRoot '../src-tauri/adapters/winget_updates.ps1')
 function Assert($Condition,[string]$Message){if(-not $Condition){throw $Message}}
 Assert ((Get-PathHash 'C:\Private\Example') -eq (Get-PathHash 'c:\private\example')) 'path hash normalization'
 Assert ((Get-CleanText "bad`0name") -eq 'badname') 'untrusted control character'

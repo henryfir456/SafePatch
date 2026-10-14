@@ -4,3 +4,6 @@ target/
 .local/
 *.sqlite*
 *.private.json
+
+src-tauri/winget-helper/obj/
+src-tauri/winget-helper/bin/

@@ -9,7 +9,7 @@ try{
   const module=join(dir,'Microsoft.PowerShell.Management');mkdirSync(module);
   writeFileSync(join(module,'Microsoft.PowerShell.Management.psd1'),"@{RootModule='Microsoft.PowerShell.Management.psm1';ModuleVersion='1.0';FunctionsToExport=@('Join-Path')}\n");
   writeFileSync(join(module,'Microsoft.PowerShell.Management.psm1'),"[IO.File]::WriteAllText($env:SAFEPATCH_TEST_MARKER,'activated');function Join-Path {throw 'SHADOW_MODULE_ACTIVATED'};Export-ModuleMember -Function Join-Path\n");
-  const script=['node_inventory','vscode_inventory','windows_inventory'].map(name=>readFileSync(new URL(`../src-tauri/adapters/${name}.ps1`,import.meta.url),'utf8').replaceAll('\r\n','\n').replace(/^if\(\$MyInvocation\.InvocationName.*$/m,'')).join('\n');
+  const script=['winget_updates','node_inventory','vscode_inventory','windows_inventory'].map(name=>readFileSync(new URL(`../src-tauri/adapters/${name}.ps1`,import.meta.url),'utf8').replaceAll('\r\n','\n').replace(/^if\(\$MyInvocation\.InvocationName.*$/m,'')).join('\n');
   const child=spawn(join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoLogo','-NoProfile','-NonInteractive','-Command','-'],{windowsHide:true,env:{...process.env,PSModulePath:dir,SAFEPATCH_TEST_MARKER:join(dir,'marker')},stdio:['pipe','pipe','pipe']});
   let stdout='';child.stdout.on('data',c=>stdout+=c);child.stderr.resume();
   const completion=new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',code=>code===0?resolve():reject(Error('Module-path test process failed')));});

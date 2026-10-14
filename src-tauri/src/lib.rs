@@ -1,5 +1,6 @@
 pub mod db;
 pub mod model;
+pub mod updates;
 pub mod windows;
 pub mod npm;
 mod project_files;
