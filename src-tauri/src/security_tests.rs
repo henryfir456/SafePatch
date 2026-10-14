@@ -187,13 +187,15 @@ fn no_advisories_and_new_versions_do_not_mean_safe() {
         applicability: Applicability::Unknown,
         priority: Priority::Undetermined,
         reasons: vec!["QUERY_FAILED".into(), "QUERY_FAILED".into()],
+        identity_reasons: vec![],
+        update_reasons: vec![],
         checks: vec![],
         findings: vec![],
     };
     summarize(&mut item);
     assert_eq!(item.applicability, Applicability::Unknown);
     assert_eq!(item.priority, Priority::Informational);
-    assert_eq!(item.reasons.len(), 1);
+    assert_eq!(item.reasons.len(), 2);
     item.findings = parse_nvd(
         &nvd(),
         product(),

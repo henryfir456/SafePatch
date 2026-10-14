@@ -65,6 +65,10 @@ pub struct SecurityItem {
     pub applicability: Applicability,
     pub priority: Priority,
     pub reasons: Vec<String>,
+    #[serde(default)]
+    pub identity_reasons: Vec<String>,
+    #[serde(default)]
+    pub update_reasons: Vec<String>,
     pub checks: Vec<SourceCheck>,
     pub findings: Vec<Finding>,
 }
@@ -549,6 +553,27 @@ pub fn apply_kev(findings: &mut [Finding], doc: &Value, now: &str) -> Result<(),
     if entries.len() > 10000 || doc["count"].as_u64() != Some(entries.len() as u64) {
         return Err("COVERAGE_PARTIAL");
     }
+    let mut ids = BTreeSet::new();
+    for entry in entries {
+        let id = entry["cveID"]
+            .as_str()
+            .filter(|s| is_cve(s))
+            .ok_or("QUERY_FAILED")?;
+        if !ids.insert(id) {
+            return Err("QUERY_FAILED");
+        }
+        for field in ["dateAdded", "dueDate"] {
+            let value = entry[field].as_str().ok_or("QUERY_FAILED")?;
+            let date =
+                chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| "QUERY_FAILED")?;
+            if date.format("%Y-%m-%d").to_string() != value {
+                return Err("QUERY_FAILED");
+            }
+        }
+        if text(&entry["requiredAction"]).is_none_or(|s| s.is_empty()) {
+            return Err("QUERY_FAILED");
+        }
+    }
     for f in findings {
         f.kev_status = "NOT_LISTED".into();
         if let Some(k) = entries.iter().find(|k| {
@@ -573,9 +598,27 @@ pub fn apply_kev(findings: &mut [Finding], doc: &Value, now: &str) -> Result<(),
     }
     Ok(())
 }
+pub fn update_unknown_reasons(e: &crate::updates::UpdateEvidence) -> Vec<String> {
+    if !matches!(e.status.as_str(), "UNKNOWN" | "ERROR") {
+        return vec![];
+    }
+    let reason = if e.reason.contains("PIN") {
+        "VERSION_PINNED"
+    } else if e.reason.contains("TIMEOUT")
+        || e.reason.contains("FAILED")
+        || e.reason.contains("ERROR")
+    {
+        "QUERY_FAILED"
+    } else if e.reason.contains("VERSION") {
+        "VERSION_UNRESOLVED"
+    } else if e.reason.contains("PRODUCT") || e.reason.contains("MATCH") {
+        "PRODUCT_UNRESOLVED"
+    } else {
+        "SOURCE_UNSUPPORTED"
+    };
+    vec![reason.into()]
+}
 pub fn summarize(item: &mut SecurityItem) {
-    item.reasons.sort();
-    item.reasons.dedup();
     let matched = item
         .findings
         .iter()
@@ -591,6 +634,17 @@ pub fn summarize(item: &mut SecurityItem) {
     } else {
         Applicability::Unknown
     };
+    if item.applicability == Applicability::Unknown {
+        item.reasons.push("COVERAGE_PARTIAL".into());
+    }
+    for reasons in [
+        &mut item.reasons,
+        &mut item.identity_reasons,
+        &mut item.update_reasons,
+    ] {
+        reasons.sort();
+        reasons.dedup();
+    }
     item.priority = if item
         .findings
         .iter()

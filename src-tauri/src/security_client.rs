@@ -14,6 +14,7 @@ use std::{
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 const TTL_SECONDS: i64 = 24 * 60 * 60;
 const MAX_QUERIES: usize = 80;
+const MAX_EVIDENCE_BYTES: usize = 16 * 1024 * 1024;
 const OSV: &str = "https://api.osv.dev/v1/query";
 const NVD: &str = "https://services.nvd.nist.gov/rest/json/cves/2.0";
 const KEV: &str =
@@ -147,6 +148,7 @@ impl<'a> Client<'a> {
             http: reqwest::Client::builder()
                 .https_only(true)
                 .redirect(reqwest::redirect::Policy::none())
+                .retry(reqwest::retry::Policy::never())
                 .no_proxy()
                 .connect_timeout(Duration::from_secs(8))
                 .timeout(Duration::from_secs(20))
@@ -252,6 +254,22 @@ fn failure(item: &mut SecurityItem, source: &str, code: &str) {
         cache: "UNAVAILABLE".into(),
     });
 }
+fn bound_evidence(item: &mut SecurityItem, budget: &mut usize) {
+    let size = serde_json::to_vec(&item.findings)
+        .map(|v| v.len())
+        .unwrap_or(usize::MAX);
+    if size > *budget {
+        item.findings.clear();
+        item.reasons.push("COVERAGE_PARTIAL".into());
+        for check in &mut item.checks {
+            check.status = "PARTIAL".into();
+            check.reason = Some("EVIDENCE_LIMIT".into());
+        }
+        *budget = 0;
+    } else {
+        *budget -= size;
+    }
+}
 pub fn collect(
     path: &Path,
     scan_id: &str,
@@ -266,6 +284,7 @@ pub fn collect(
     runtime.block_on(async {
         let db = crate::db::open(path).map_err(|_| "DATABASE_OPEN_FAILED")?;
         let mut client = Client::new(&db, cancel.clone())?;
+        let mut evidence_budget = MAX_EVIDENCE_BYTES;
         let mut report = SecurityReport {
             scan_id: scan_id.into(),
             windows_scan_id: windows.as_ref().map(|w| w.0.clone()),
@@ -285,10 +304,21 @@ pub fn collect(
                 applicability: Applicability::Unknown,
                 priority: Priority::Undetermined,
                 reasons: vec![],
+                identity_reasons: if a.normalized_id.is_some()
+                    && a.provenance.iter().any(|p| {
+                        p.scanner == "winget" && p.catalog_source.as_deref() == Some("winget")
+                    }) {
+                    vec![]
+                } else {
+                    vec!["PRODUCT_UNRESOLVED".into()]
+                },
+                update_reasons: update_unknown_reasons(&a.update),
                 checks: vec![],
                 findings: vec![],
             };
-            if let Some(p) = product_for(&a) {
+            if evidence_budget == 0 {
+                failure(&mut item, "NVD", "COVERAGE_PARTIAL");
+            } else if let Some(p) = product_for(&a) {
                 if let Some(version) = a
                     .installed_version
                     .as_deref()
@@ -328,6 +358,7 @@ pub fn collect(
             if item.findings.is_empty() {
                 item.reasons.push("COVERAGE_PARTIAL".into());
             }
+            bound_evidence(&mut item, &mut evidence_budget);
             report.items.push(item);
         }
         if let Some((_, graph)) = npm {
@@ -342,10 +373,14 @@ pub fn collect(
                     applicability: Applicability::Unknown,
                     priority: Priority::Undetermined,
                     reasons: vec!["COVERAGE_PARTIAL".into()],
+                    identity_reasons: vec!["COVERAGE_PARTIAL".into()],
+                    update_reasons: vec!["SOURCE_UNSUPPORTED".into()],
                     checks: vec![],
                     findings: vec![],
                 };
-                if p.source == "NPM_REGISTRY_METADATA" {
+                if evidence_budget == 0 {
+                    failure(&mut item, "OSV", "COVERAGE_PARTIAL");
+                } else if p.source == "NPM_REGISTRY_METADATA" {
                     if let Some(version) = p.version {
                         match client
                             .query(Query::Osv {
@@ -376,6 +411,7 @@ pub fn collect(
                 } else {
                     item.reasons.push("SOURCE_UNSUPPORTED".into())
                 }
+                bound_evidence(&mut item, &mut evidence_budget);
                 report.items.push(item);
             }
         }
@@ -421,16 +457,48 @@ pub fn collect(
                 }
             }
         }
+        let mut final_budget = MAX_EVIDENCE_BYTES;
         for i in &mut report.items {
+            bound_evidence(i, &mut final_budget);
             summarize(i);
         }
         cancelled(&cancel)?;
+        report.checked_at = chrono::Utc::now().to_rfc3339();
         Ok(report)
     })
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn oversized_evidence_becomes_partial_instead_of_freezing_report() {
+        let mut item = SecurityItem {
+            id: "a".into(),
+            kind: "WINDOWS_INSTALLED".into(),
+            display_name: "a".into(),
+            installed_version: None,
+            update: Default::default(),
+            applicability: Applicability::Unknown,
+            priority: Priority::Undetermined,
+            reasons: vec![],
+            identity_reasons: vec![],
+            update_reasons: vec![],
+            checks: vec![SourceCheck {
+                source: "NVD".into(),
+                status: "COMPLETE".into(),
+                checked_at: "now".into(),
+                reason: None,
+                cache: "MISS".into(),
+            }],
+            findings: vec![],
+        };
+        let mut budget = 1;
+        bound_evidence(&mut item, &mut budget);
+        assert_eq!(budget, 0);
+        assert_eq!(item.checks[0].status, "PARTIAL");
+        assert_eq!(item.checks[0].reason.as_deref(), Some("EVIDENCE_LIMIT"));
+        assert!(item.reasons.contains(&"COVERAGE_PARTIAL".to_owned()));
+    }
     fn server(response: Option<&'static str>) -> String {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -454,6 +522,7 @@ mod tests {
     async fn http_failure_redirect_and_rate_limit_remain_unknown() {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::Policy::never())
             .no_proxy()
             .build()
             .unwrap();
