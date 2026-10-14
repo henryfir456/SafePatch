@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 0.2.0 Preview（2026-10-13）
+## 0.2.0 Preview（2026-10-14）
 
 - 新增唯讀 WinGet 更新健檢：以 Microsoft 簽章程式、官方目錄、型別化 WinGet COM API 與精確產品 ID／目前版本，顯示可用目標版本、來源與查詢時間。
 - 更新狀態分為 UPDATE_AVAILABLE、NO_UPDATE_REPORTED、UNKNOWN、ERROR。未回報更新不保證最新；漏洞風險獨立標示「未檢查」。
