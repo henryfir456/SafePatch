@@ -1,5 +1,9 @@
 pub mod db;
 pub mod build_info;
+pub mod security;
+pub mod security_client;
+pub mod security_service;
+#[cfg(test)] mod security_tests;
 pub mod model;
 pub mod updates;
 pub mod windows;
@@ -79,7 +83,7 @@ impl ScanService {
     }
     fn validate_id(id:&str)->Result<(),String>{uuid::Uuid::parse_str(id).map(|_|()).map_err(|_|"INVALID_SCAN_ID".into())}
     pub fn cancel(&self,id:&str)->Result<(),String>{Self::validate_id(id)?;let guard=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?;if let Some(a)=guard.as_ref(){if a.scan.id==id && a.scan.status=="RUNNING"{a.cancel.store(true,Ordering::Relaxed);return Ok(())}}Err("SCAN_NOT_RUNNING".into())}
-    pub fn status(&self,id:&str)->Result<Scan,String>{Self::validate_id(id)?;if let Some(a)=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?.as_ref(){if a.scan.id==id{return Ok(a.scan.clone())}}db::scan(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,Some(id))?.ok_or_else(||"SCAN_NOT_FOUND".into())}
+    pub fn status(&self,id:&str)->Result<Scan,String>{Self::validate_id(id)?;if let Some(a)=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?.as_ref(){if a.scan.id==id{return Ok(a.scan.clone())}}let d=db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?;db::scan(&d,Some(id))?.or(security_service::security_scan(&d,Some(id))?).ok_or_else(||"SCAN_NOT_FOUND".into())}
     pub fn latest(&self)->Result<Option<Scan>,String>{self.latest_scope("windows")}
     pub fn latest_project(&self)->Result<Option<Scan>,String>{self.latest_scope("npm")}
     fn latest_scope(&self,scope:&str)->Result<Option<Scan>,String>{if let Some(a)=self.active.lock().map_err(|_|"SCAN_STATE_FAILED")?.as_ref(){if a.scope==scope{return Ok(Some(a.scan.clone()))}}db::scan_in_scope(&db::open(&self.path).map_err(|_|"DATABASE_OPEN_FAILED")?,None,scope)}
