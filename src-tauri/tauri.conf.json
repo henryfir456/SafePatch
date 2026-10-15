@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SafePatch Preview",
-  "version": "0.2.0",
+  "version": "0.3.0-preview",
   "identifier": "io.github.henryfir456.safepatch",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -47,6 +47,7 @@
         ]
       },
       "wix": {
+        "version": "0.3.0",
         "template": "installers/preview.wxs",
         "upgradeCode": "903586ee-61da-4e98-bc9e-7e59a3bd63a7",
         "enableElevatedUpdateTask": false,

@@ -1,6 +1,8 @@
 node_modules/
 dist/
 target/
+src-tauri/target-acceptance/
+src-tauri/gen/
 .local/
 *.sqlite*
 *.private.json

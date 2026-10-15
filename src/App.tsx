@@ -3,6 +3,7 @@ import { api, Asset, Scan } from './api';
 const active=(s:Scan|null)=>s?.status==='RUNNING';
 import { UpdateTable, updateStatus } from './UpdateTable';
 import { NpmInventory } from "./NpmInventory";
+import { BuildInfo } from './BuildInfo';
 export function App(){
   const [tab,setTab]=useState('updates'),[status,setStatus]=useState('UPDATE_AVAILABLE');
   const [projectBusy,setProjectBusy]=useState(false);
@@ -14,7 +15,7 @@ export function App(){
   async function start(){setBusy(true);setError('');try{const s=await api.start();setScan(s);setAssets([]);}catch{setError('SCAN_START_FAILED：請確認沒有其他掃描正在執行，且本地資料庫可寫入。');}finally{setBusy(false);}}
   async function cancel(){if(!scan)return;try{await api.cancel(scan.id);}catch{setError('CANCEL_FAILED：取消要求未送達。');}}
   const shown=assets.filter(a=>(a.display_name+' '+(a.publisher??'')+' '+(a.normalized_id??'')).toLowerCase().includes(query.toLowerCase())&&(tab==='updates'||source==='all'||a.provenance.some(p=>p.scanner===source)));
-  return <main><header><div><span className="eyebrow">READ-ONLY UPDATE HEALTH</span><h1>SafePatch</h1><p>Windows 軟體更新健檢 · 資料保留於本機</p></div><div className="actions"><button disabled={loading||busy||active(scan)||projectBusy} onClick={start}>{busy?'啟動中…':'開始唯讀掃描'}</button>{active(scan)&&<button className="secondary" onClick={cancel}>取消掃描</button>}</div></header>
+  return <main><header><div><span className="eyebrow">READ-ONLY UPDATE HEALTH</span><h1>SafePatch</h1><BuildInfo location="header"/><p>Windows 軟體更新健檢 · 資料保留於本機</p></div><div className="actions"><button disabled={loading||busy||active(scan)||projectBusy} onClick={start}>{busy?'啟動中…':'開始唯讀掃描'}</button>{active(scan)&&<button className="secondary" onClick={cancel}>取消掃描</button>}</div></header>
     <aside className="notice"><strong>UNKNOWN ≠ 安全</strong> 唯讀查詢可用更新，尚未執行漏洞比對。不會更新軟體、安裝依賴或要求提高權限。WinGet 可能讀取官方來源中繼資料；不傳送本機清單。</aside>
     {error&&<p role="alert" className="error">{error}</p>}
     <section className="summary" aria-label="掃描摘要"><div><span>可用更新</span><strong data-testid="update-count">{assets.filter(a=>updateStatus(a)==='UPDATE_AVAILABLE').length}</strong></div><div><span>已知安全風險</span><strong>未檢查</strong></div><div><span>無法確認（含檢查失敗）</span><strong data-testid="unknown-count">{assets.filter(a=>['UNKNOWN','ERROR'].includes(updateStatus(a))).length}</strong></div><div><span>最後掃描時間</span><strong className="timestamp">{scan?.finished_at??'尚無完成掃描'}</strong><small>掃描狀態：{scan?.status??'尚未掃描'}</small></div></section>
@@ -26,5 +27,5 @@ export function App(){
     {tab==='inventory'&&<section className="inventory"><div className="toolbar"><h2>實際軟體清單</h2><input aria-label="搜尋軟體" placeholder="搜尋名稱、Publisher 或 ID" value={query} onChange={e=>setQuery(e.target.value)}/><select aria-label="掃描來源" value={source} onChange={e=>setSource(e.target.value)}><option value="all">所有來源</option><option value="registry">Registry</option><option value="winget">WinGet</option><option value="vscode">VS Code</option><option value="vscode-extension">VS Code Extensions</option><option value="node">Node.js runtimes</option></select></div>
     <p className="subtle">Registry 與 WinGet 的名稱／版本相同仍可能屬於不同安裝。候選重複項保留，來源關聯不代表由 WinGet 安裝。</p>
     {!assets.length?<p className="empty">{active(scan)?'正在讀取真實 Windows 資料…':'尚無盤點結果。請開始掃描；部分失敗會保留可用結果。'}</p>:<div className="table-wrap"><table><thead><tr><th>產品 / ID</th><th>版本</th><th>Publisher</th><th>觀測來源</th><th>身份 / 重複識別</th></tr></thead><tbody>{shown.map(a=><tr key={a.id}><td><b>{a.display_name}</b>{a.normalized_id&&<small>{a.normalized_id}</small>}</td><td>{a.installed_version??'UNKNOWN'}</td><td>{a.publisher??'UNKNOWN'}</td><td>{a.provenance.map((p,i)=><small key={i}>{p.scanner} · {p.scope} · {p.view}{p.profile_ref&&` / profile: ${p.profile_ref}`}{p.catalog_source&&` · catalog: ${p.catalog_source}`}</small>)}<small>安裝來源：{a.installation_source}</small></td><td><span className="badge">{a.identity_confidence}</span>{a.support&&<><small>support: {a.support.status}</small><small>end: {a.support.end_date??"UNKNOWN"} / checked: {a.support.checked_at??"UNKNOWN"}</small></>}{a.duplicate_group&&<small>候選重複 · {a.duplicate_group.slice(0,10)}</small>}</td></tr>)}</tbody></table></div>}
-    <p className="subtle">顯示 {shown.length} / {assets.length} · 不會探測被盤點程式的可執行檔版本</p></section>}<div hidden={tab!=='inventory'}><NpmInventory disabled={loading||busy||!!active(scan)} onActive={setProjectBusy}/></div></main>;
+    <p className="subtle">顯示 {shown.length} / {assets.length} · 不會探測被盤點程式的可執行檔版本</p></section>}<div hidden={tab!=='inventory'}><NpmInventory disabled={loading||busy||!!active(scan)} onActive={setProjectBusy}/></div><BuildInfo location="footer"/></main>;
 }

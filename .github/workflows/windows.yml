@@ -28,6 +28,8 @@ jobs:
         run: npm test
       - name: SQLite schema regression tests
         run: npm run test:schema
+      - name: Embedded version consistency and negative contracts
+        run: npm run test:version
       - name: PowerShell adapter regression tests
         shell: powershell
         run: ./scripts/test-adapter.ps1
@@ -67,7 +69,9 @@ jobs:
       - name: Rust static analysis
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Production Windows EXE and MSI bundles
-        run: npm run tauri -- build --verbose --no-binary-patching -- --locked
+        run: |
+          git status --short
+          npm run tauri -- build --verbose --no-binary-patching -- --locked
       - name: Verify compiled production packages and stage Preview
         shell: pwsh
         run: ./scripts/prepare-preview-artifact.ps1

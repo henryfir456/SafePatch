@@ -1,4 +1,5 @@
 pub mod db;
+pub mod build_info;
 pub mod model;
 pub mod updates;
 pub mod windows;
