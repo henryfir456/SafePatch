@@ -1,0 +1,129 @@
+name: Publish verified Windows Preview
+on:
+  push:
+    branches: [delivery/windows-preview-0.1.0-22]
+    paths: [.github/workflows/publish-preview.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: publish-windows-preview-0.1.0
+  cancel-in-progress: false
+jobs:
+  deliver:
+    if: github.repository == 'henryfir456/SafePatch' && github.ref == 'refs/heads/delivery/windows-preview-0.1.0-22'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PUBLISH_PREVIEW: 'true'
+    steps:
+      - name: Verify exact merged-main CI artifact and publish only reviewed bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$true
+          $repo='henryfir456/SafePatch'
+          $source='6d7537cb912396f3ba0e2a93e04d4c9f0dd5eda1'
+          $tag='v0.1.0-preview'
+          $zipHash='9aeddbec34a13e69f358851789bc305bab457ab7174af41b17e687ca9fc3b74e'
+          $expected=@{
+            'SafePatch-Preview-0.1.0-x64-setup.exe'='78cb650c88beb6e947d8db53183ef976955ba8bb0ac7e2871058bfa69df233eb'
+            'SafePatch-Preview-0.1.0-x64.msi'='79522cdaf2d7cdb1044b4d74266f64b7314a3517e00ce6c376322f0ae9c7e399'
+            'safepatch.exe'='7a9b94a015ffdbc62bdfc9dc2418e6187b2ce7a4eec75c281ac62b474f8bded0'
+          }
+          function Api($path) { & gh api "repos/$repo/$path" | ConvertFrom-Json }
+          function Hash($path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+          if((Api 'branches/main').commit.sha -ne $source){throw 'SOURCE_MAIN_CHANGED'}
+          $run=Api 'actions/runs/38036747847'
+          if($run.head_sha -ne $source -or $run.head_branch -ne 'main' -or $run.event -ne 'push' -or $run.conclusion -ne 'success'){throw 'SOURCE_CI_INVALID'}
+          $artifact=Api 'actions/artifacts/11664174204'
+          if($artifact.expired -or $artifact.digest -ne "sha256:$zipHash" -or $artifact.workflow_run.id -ne $run.id -or $artifact.workflow_run.head_sha -ne $source -or $artifact.name -ne "SafePatch-Windows-Preview-$source"){throw 'SOURCE_ARTIFACT_INVALID'}
+          $task=Join-Path $env:RUNNER_TEMP ("preview-release-"+$env:GITHUB_RUN_ID+"-"+$env:GITHUB_RUN_ATTEMPT)
+          $null=New-Item -ItemType Directory -Path $task
+          $zip=Join-Path $task 'SafePatch-Windows-Preview-0.1.0-x64.zip'
+          Invoke-WebRequest -Uri "https://api.github.com/repos/$repo/actions/artifacts/11664174204/zip" -Headers @{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json'} -OutFile $zip
+          if((Hash $zip) -ne $zipHash){throw 'ARCHIVE_HASH_MISMATCH'}
+          $files=Join-Path $task 'verified'
+          Expand-Archive -LiteralPath $zip -DestinationPath $files
+          $allowed=@('SafePatch-Preview-0.1.0-x64-setup.exe','SafePatch-Preview-0.1.0-x64.msi','safepatch.exe','README.md','manifest.json','ci-package-checks.json','ci-lifecycle.json','SHA256SUMS.txt')
+          $entries=@(Get-ChildItem -LiteralPath $files -Recurse -Force)
+          if($entries.Count -ne $allowed.Count -or @($entries|Where-Object{$_.PSIsContainer -or $_.Name -notin $allowed}).Count){throw 'ARTIFACT_FILE_SET_INVALID'}
+          foreach($name in $expected.Keys){if((Hash (Join-Path $files $name)) -ne $expected[$name]){throw 'PAYLOAD_HASH_MISMATCH'}}
+          $seen=@{}
+          foreach($line in Get-Content -LiteralPath (Join-Path $files 'SHA256SUMS.txt')){
+            if($line -notmatch '^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$'){throw 'CHECKSUM_FORMAT_INVALID'}
+            $name=$Matches[2]; $sum=$Matches[1]
+            if($name -notin $allowed -or $name -eq 'SHA256SUMS.txt' -or $seen.ContainsKey($name)){throw 'CHECKSUM_FILE_SET_INVALID'}
+            if((Hash (Join-Path $files $name)) -ne $sum){throw 'CHECKSUM_MISMATCH'}
+            $seen[$name]=$sum
+          }
+          if($seen.Count -ne 7){throw 'CHECKSUM_MISSING'}
+          $manifest=Get-Content -LiteralPath (Join-Path $files 'manifest.json') -Raw|ConvertFrom-Json
+          if($manifest.source_commit -ne $source -or $manifest.version -ne '0.1.0' -or $manifest.signature -ne 'UNSIGNED' -or $manifest.architecture -ne 'x86_64' -or $manifest.ci_run_id -ne '38036747847' -or $manifest.user_windows_10_11 -ne 'NOT_VERIFIED' -or $manifest.production_sha256 -ne $expected['safepatch.exe']){throw 'MANIFEST_IDENTITY_INVALID'}
+          if(@($manifest.installers).Count -ne 2){throw 'MANIFEST_INSTALLERS_INVALID'}
+          foreach($installer in $manifest.installers){if($installer.name -eq 'safepatch.exe' -or -not $expected.ContainsKey($installer.name) -or $installer.sha256 -ne $expected[$installer.name]){throw 'MANIFEST_INSTALLERS_INVALID'}}
+          $package=Get-Content -LiteralPath (Join-Path $files 'ci-package-checks.json') -Raw|ConvertFrom-Json
+          if($package.status -ne 'PASS' -or $package.payload_sha256 -ne $expected['safepatch.exe'] -or -not $package.compiled_msi_per_user -or -not $package.compiled_msi_limited -or -not $package.allusers_guard -or -not $package.no_executable_custom_actions -or -not $package.extracted_payloads_match){throw 'PACKAGE_GATE_INVALID'}
+          $lifecycle=Get-Content -LiteralPath (Join-Path $files 'ci-lifecycle.json') -Raw|ConvertFrom-Json
+          if($lifecycle.status -notin @('PASS','NOT_VERIFIED')){throw 'LIFECYCLE_FAILED'}
+          Write-Output "VERIFIED_SOURCE=$source"
+          Write-Output "VERIFIED_ARCHIVE_SHA256=$zipHash"
+          Write-Output ("HOSTED_LIFECYCLE="+$lifecycle.status)
+          if($env:PUBLISH_PREVIEW -ne 'true'){Write-Output 'RELEASE_DRY_RUN_PASS';exit 0}
+          # No scanned code or downloaded installer is executed. Never replace an existing release.
+          $releases=Api 'releases?per_page=100'
+          if(@($releases|Where-Object tag_name -eq $tag).Count){throw 'RELEASE_ALREADY_EXISTS'}
+          $refs=Api 'git/matching-refs/tags/v0.1.0-preview'
+          if(@($refs|Where-Object ref -eq "refs/tags/$tag").Count){throw 'TAG_ALREADY_EXISTS'}
+          $notes=Join-Path $task 'release-notes.md'
+          @"
+          Windows inventory Preview 0.1.0, x64, UNSIGNED. Source: $source (merged PR #23).
+          Exact production files from successful clean Windows Server CI 38036747847; no rebuild or payload modification.
+          Scope: Registry/WinGet, VS Code/extensions, Node resource metadata and opt-in npm lockfile declarations.
+          No Python/Git, CVE analysis, automatic updates, elevation or private inventory upload.
+          
+          Requires Windows 10/11 x64 and existing Microsoft Edge WebView2 Evergreen Runtime.
+          Rust/Node/npm/VS Code/C++ developer tools are not required to run the installed app.
+          Choose the EXE current-user wizard or MSI per-user package. The installer does not download/update WebView2.
+          Open SafePatch Preview from its Start-menu folder. Start a read-only scan, cancel/rescan, close/reopen.
+          Uninstall the chosen format through Settings > Apps after closing the app; local history is retained.
+          Read attached README.md for coverage, installation and hash checks. Do not bypass Windows security policies.
+          
+          Hosted restricted-token install/UI lifecycle: $($lifecycle.status).
+          Current Windows 10/11 user-device non-admin installation, launch, actual scans, cancellation/rescan/restart and uninstall: NOT VERIFIED.
+          Local agent environment is ENVIRONMENT_BLOCKED (MXC launcher D:\ volume enumeration); CI is not real-device acceptance.
+          
+          SHA-256:
+          - EXE: $($expected['SafePatch-Preview-0.1.0-x64-setup.exe'])
+          - MSI: $($expected['SafePatch-Preview-0.1.0-x64.msi'])
+          - ZIP: $zipHash
+          ZIP also contains the production safepatch.exe. SHA256SUMS.txt covers files extracted from that ZIP.
+          Tracking: #22, #24. Python draft PR #21 remains unmerged.
+          "@ | Set-Content -LiteralPath $notes -Encoding utf8
+          # Create the fixed-source tag explicitly; saving a draft need not create its tag.
+          & gh api --method POST "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$source" | Out-Null
+          $createdRef=Api "git/ref/tags/$tag"
+          if($createdRef.object.type -ne 'commit' -or $createdRef.object.sha -ne $source){throw 'RELEASE_TAG_SOURCE_MISMATCH'}
+          & gh release create $tag --repo $repo --verify-tag --target $source --draft --prerelease --latest=false --title 'SafePatch Windows Preview 0.1.0 (unsigned)' --notes-file $notes
+          $uploads=@($zip)
+          $assetNames=@('SafePatch-Preview-0.1.0-x64-setup.exe','SafePatch-Preview-0.1.0-x64.msi','README.md','manifest.json','ci-package-checks.json','ci-lifecycle.json','SHA256SUMS.txt')
+          foreach($name in $assetNames){$uploads+=Join-Path $files $name}
+          & gh release upload $tag @uploads --repo $repo
+          $check=Join-Path $task 'release-download'
+          $null=New-Item -ItemType Directory -Path $check
+          & gh release download $tag --repo $repo --dir $check
+          if(@(Get-ChildItem -LiteralPath $check -File).Count -ne $uploads.Count){throw 'RELEASE_ASSET_COUNT_INVALID'}
+          foreach($upload in $uploads){
+            $name=[IO.Path]::GetFileName($upload)
+            if((Hash (Join-Path $check $name)) -ne (Hash $upload)){throw 'RELEASE_DOWNLOAD_HASH_MISMATCH'}
+            Write-Output ("RELEASE_DOWNLOAD_SHA256 "+(Hash $upload)+" "+$name)
+          }
+          $ref=Api "git/ref/tags/$tag"
+          if($ref.object.type -ne 'commit' -or $ref.object.sha -ne $source){throw 'RELEASE_TAG_SOURCE_MISMATCH'}
+          if((Api 'branches/main').commit.sha -ne $source){throw 'SOURCE_MAIN_CHANGED'}
+          & gh release edit $tag --repo $repo --draft=false --prerelease --latest=false
+          Write-Output "RELEASE_PUBLISHED=https://github.com/$repo/releases/tag/$tag"
