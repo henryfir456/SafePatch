@@ -1,0 +1,283 @@
+use crate::security::*;
+use serde_json::{json, Value};
+fn osv() -> Value {
+    json!({"vulns":[{"id":"GHSA-test-1234-5678","aliases":["CVE-2024-1234","CVE-2024-1234"],"database_specific":{"severity":"HIGH"},"affected":[{"package":{"ecosystem":"npm","name":"example"},"ranges":[{"type":"SEMVER","events":[{"introduced":"1.0.0"},{"fixed":"1.2.0"}]},{"type":"SEMVER","events":[{"introduced":"2.0.0"},{"last_affected":"2.0.3"}]}]}],"references":[{"url":"javascript:alert(1)"},{"url":"https://example.org/advisory"}]}]})
+}
+fn nvd() -> Value {
+    json!({"totalResults":1,"startIndex":0,"vulnerabilities":[{"cve":{"id":"CVE-2024-1234","vulnStatus":"Analyzed","configurations":[{"nodes":[{"operator":"OR","cpeMatch":[{"vulnerable":true,"criteria":"cpe:2.3:a:7-zip:7-zip:*:*:*:*:*:*:*:*","versionStartIncluding":"23.0","versionEndExcluding":"24.07"}]}]}],"metrics":{"cvssMetricV31":[{"type":"Primary","source":"nvd@nist.gov","cvssData":{"baseScore":9.8,"baseSeverity":"CRITICAL","vectorString":"CVSS:3.1/AV:N"}}]},"references":[{"url":"https://www.7-zip.org/"}]}}]})
+}
+fn product() -> Product {
+    PRODUCTS[2]
+}
+#[test]
+fn mixed_osv_fix_last_affected_and_repeated_zero_are_untrusted() {
+    for events in [
+        json!([{"introduced":"1.0.0"},{"fixed":"1.2.0"},{"introduced":"2.0.0"},{"last_affected":"2.0.3"}]),
+        json!([{"introduced":"0"},{"fixed":"1.2.0"},{"introduced":"0"}]),
+    ] {
+        let mut v = osv();
+        v["vulns"][0]["affected"][0]["ranges"] = json!([{"type":"SEMVER","events":events}]);
+        let findings = parse_osv(&v, "example", "1.1.0", true, "now").unwrap();
+        assert_eq!(findings[0].applicability, Applicability::Potential);
+        assert!(findings[0].fixed_versions.is_empty());
+    }
+}
+#[test]
+fn na_qualifiers_need_observed_evidence_instead_of_wildcard_matching() {
+    for index in 6..13 {
+        let mut v = nvd();
+        let mut fields: Vec<_> = "cpe:2.3:a:7-zip:7-zip:*:*:*:*:*:*:*:*".split(':').collect();
+        fields[index] = "-";
+        v["vulnerabilities"][0]["cve"]["configurations"][0]["nodes"][0]["cpeMatch"][0]
+            ["criteria"] = json!(fields.join(":"));
+        assert_eq!(
+            parse_nvd(&v, product(), "24.06", "now").unwrap().0[0].applicability,
+            Applicability::Potential
+        );
+    }
+    let mut v = nvd();
+    v["vulnerabilities"][0]["cve"]["configurations"][0]["nodes"][0]["cpeMatch"][0]["criteria"] =
+        json!("cpe:2.3:a:7-zip:7-zip:*:*:*:*:*:windows:*:*");
+    assert_eq!(
+        parse_nvd(&v, product(), "24.06", "now").unwrap().0[0].applicability,
+        Applicability::Matched
+    );
+}
+#[test]
+fn malformed_negation_never_confirms_applicability() {
+    for value in [json!("true"), json!(1), json!(null), json!({})] {
+        for level in ["config", "node"] {
+            let mut v = nvd();
+            if level == "config" {
+                v["vulnerabilities"][0]["cve"]["configurations"][0]["negate"] = value.clone();
+            } else {
+                v["vulnerabilities"][0]["cve"]["configurations"][0]["nodes"][0]["negate"] =
+                    value.clone();
+            }
+            let mut findings = parse_nvd(&v, product(), "24.06", "now").unwrap().0;
+            assert_eq!(findings[0].applicability, Applicability::Potential);
+            let catalog = json!({"count":1,"vulnerabilities":[{"cveID":"CVE-2024-1234","dateAdded":"2024-01-01","dueDate":"2024-02-01","requiredAction":"Apply updates"}]});
+            apply_kev(&mut findings, &catalog, "now").unwrap();
+            assert_eq!(findings[0].priority, Priority::Undetermined);
+        }
+    }
+}
+#[test]
+fn malformed_kev_is_not_a_negative_catalog() {
+    let mut findings = parse_nvd(&nvd(), product(), "24.06", "now").unwrap().0;
+    let catalog = json!({"count":1,"vulnerabilities":[{"cveID":"not-a-CVE","dateAdded":"2024-01-01","dueDate":"2024-02-01","requiredAction":"Apply updates"}]});
+    assert!(apply_kev(&mut findings, &catalog, "now").is_err());
+    assert_eq!(findings[0].kev_status, "NOT_CHECKED");
+    assert!(findings[0].kev.is_none());
+}
+#[test]
+fn nvd_negated_ranges_cannot_prove_not_affected() {
+    for key in ["config", "node"] {
+        let mut v = nvd();
+        if key == "config" {
+            v["vulnerabilities"][0]["cve"]["configurations"][0]["negate"] = json!(true);
+        } else {
+            v["vulnerabilities"][0]["cve"]["configurations"][0]["nodes"][0]["negate"] = json!(true);
+        }
+        assert_eq!(
+            parse_nvd(&v, product(), "24.07", "now").unwrap().0[0].applicability,
+            Applicability::Potential
+        );
+    }
+}
+#[test]
+fn osv_build_metadata_does_not_change_semver_applicability() {
+    assert_eq!(
+        parse_osv(&osv(), "example", "2.0.3+build", true, "now").unwrap()[0].applicability,
+        Applicability::Matched
+    );
+    assert_eq!(
+        parse_osv(&osv(), "example", "1.2.0+build", true, "now").unwrap()[0].applicability,
+        Applicability::NotAffected
+    );
+    let mut v = osv();
+    v["vulns"][0]["affected"][0]["ranges"] = json!([]);
+    v["vulns"][0]["affected"][0]["versions"] = json!(["1.1.0"]);
+    assert_eq!(
+        parse_osv(&v, "example", "1.1.0+build", true, "now").unwrap()[0].applicability,
+        Applicability::Matched
+    );
+}
+#[test]
+fn osv_exact_installed_version_and_fixed_evidence() {
+    let f = parse_osv(&osv(), "example", "1.1.0", true, "now").unwrap();
+    assert_eq!(f[0].applicability, Applicability::Matched);
+    assert_eq!(f[0].fixed_versions, vec!["1.2.0"]);
+    assert_eq!(f[0].priority, Priority::High);
+    assert_eq!(f[0].cves.len(), 1);
+    assert_eq!(f[0].references.len(), 1);
+}
+#[test]
+fn osv_not_affected_and_inclusive_last_affected() {
+    for version in ["0.9.0", "1.2.0", "2.0.4"] {
+        assert_eq!(
+            parse_osv(&osv(), "example", version, true, "now").unwrap()[0].applicability,
+            Applicability::NotAffected
+        );
+    }
+    assert_eq!(
+        parse_osv(&osv(), "example", "2.0.3", true, "now").unwrap()[0].applicability,
+        Applicability::Matched
+    );
+}
+#[test]
+fn declarations_never_claim_installed_vulnerability() {
+    let f = parse_osv(&osv(), "example", "1.1.0", false, "now").unwrap();
+    assert_eq!(f[0].applicability, Applicability::Potential);
+    assert_eq!(f[0].priority, Priority::Undetermined);
+}
+#[test]
+fn identity_collision_missing_and_unsupported_rules() {
+    assert!(parse_osv(&osv(), "other-example", "1.1.0", true, "now")
+        .unwrap()
+        .is_empty());
+    let mut v = osv();
+    v["vulns"][0]["affected"][0]["ranges"][0]["type"] = json!("GIT");
+    assert_eq!(
+        parse_osv(&v, "example", "1.1.0", true, "now").unwrap()[0].applicability,
+        Applicability::Potential
+    );
+    assert!(parse_osv(&v, "example", "not-a-version", true, "now").is_err());
+}
+#[test]
+fn malformed_intervals_and_withdrawn_records_do_not_confirm() {
+    let mut v = osv();
+    v["vulns"][0]["affected"][0]["ranges"][0]["events"] =
+        json!([{"introduced":"2.0.0"},{"fixed":"1.0.0"}]);
+    assert_eq!(
+        parse_osv(&v, "example", "1.1.0", true, "now").unwrap()[0].applicability,
+        Applicability::Potential
+    );
+    v["vulns"][0]["withdrawn"] = json!("2024-01-01");
+    assert!(parse_osv(&v, "example", "1.1.0", true, "now")
+        .unwrap()
+        .is_empty());
+}
+#[test]
+fn osv_semver_prereleases_and_multiple_intervals() {
+    let mut v = osv();
+    v["vulns"][0]["affected"][0]["ranges"][0]["events"] =
+        json!([{"introduced":"1.0.0-beta.1"},{"fixed":"1.0.0"}]);
+    assert_eq!(
+        parse_osv(&v, "example", "1.0.0-beta.2", true, "now").unwrap()[0].applicability,
+        Applicability::Matched
+    );
+    assert_eq!(
+        parse_osv(&v, "example", "1.0.0", true, "now").unwrap()[0].applicability,
+        Applicability::NotAffected
+    );
+}
+#[test]
+fn nvd_product_and_installed_version_are_both_required() {
+    let (f, complete) = parse_nvd(&nvd(), product(), "24.06", "now").unwrap();
+    assert!(complete);
+    assert_eq!(f[0].applicability, Applicability::Matched);
+    assert_eq!(f[0].priority, Priority::High);
+    assert!(f[0].fixed_versions.is_empty());
+    assert_eq!(
+        parse_nvd(&nvd(), product(), "24.07", "now").unwrap().0[0].applicability,
+        Applicability::NotAffected
+    );
+    assert!(parse_nvd(&nvd(), PRODUCTS[0], "24.06", "now")
+        .unwrap()
+        .0
+        .is_empty());
+}
+#[test]
+fn nvd_complex_environment_and_edition_are_potential() {
+    let mut v = nvd();
+    v["vulnerabilities"][0]["cve"]["configurations"][0]["operator"] = json!("AND");
+    assert_eq!(
+        parse_nvd(&v, product(), "24.06", "now").unwrap().0[0].applicability,
+        Applicability::Potential
+    );
+    v = nvd();
+    v["vulnerabilities"][0]["cve"]["configurations"][0]["nodes"][0]["cpeMatch"][0]["criteria"] =
+        json!("cpe:2.3:a:7-zip:7-zip:*:*:special:*:*:*:*:*");
+    assert_eq!(
+        parse_nvd(&v, product(), "24.06", "now").unwrap().0[0].applicability,
+        Applicability::Potential
+    );
+    assert_eq!(
+        parse_nvd(&nvd(), product(), "beta", "now").unwrap().0[0].applicability,
+        Applicability::Potential
+    );
+}
+#[test]
+fn truncated_pages_are_not_complete_and_rejected_cve_ignored() {
+    let mut v = nvd();
+    v["totalResults"] = json!(2);
+    assert!(!parse_nvd(&v, product(), "24.06", "now").unwrap().1);
+    v["vulnerabilities"][0]["cve"]["vulnStatus"] = json!("Rejected");
+    assert!(parse_nvd(&v, product(), "24.06", "now")
+        .unwrap()
+        .0
+        .is_empty());
+}
+#[test]
+fn kev_escalates_only_confirmed_applicability() {
+    let catalog = json!({"count":1,"vulnerabilities":[{"cveID":"CVE-2024-1234","dateAdded":"2024-01-01","dueDate":"2024-02-01","requiredAction":"Apply vendor mitigation"}]});
+    for (version, expected) in [
+        ("24.06", Priority::Critical),
+        ("24.07", Priority::Undetermined),
+        ("beta", Priority::Undetermined),
+    ] {
+        let mut f = parse_nvd(&nvd(), product(), version, "now").unwrap().0;
+        apply_kev(&mut f, &catalog, "now").unwrap();
+        assert_eq!(f[0].priority, expected);
+        assert_eq!(f[0].kev_status, "LISTED");
+    }
+}
+#[test]
+fn no_advisories_and_new_versions_do_not_mean_safe() {
+    let mut item = SecurityItem {
+        id: "a".into(),
+        kind: "WINDOWS_INSTALLED".into(),
+        display_name: "a".into(),
+        installed_version: Some("24.06".into()),
+        update: crate::updates::UpdateEvidence {
+            status: "UPDATE_AVAILABLE".into(),
+            target_version: Some("25.0".into()),
+            ..Default::default()
+        },
+        applicability: Applicability::Unknown,
+        priority: Priority::Undetermined,
+        reasons: vec!["QUERY_FAILED".into(), "QUERY_FAILED".into()],
+        identity_reasons: vec![],
+        update_reasons: vec![],
+        checks: vec![],
+        findings: vec![],
+    };
+    summarize(&mut item);
+    assert_eq!(item.applicability, Applicability::Unknown);
+    assert_eq!(item.priority, Priority::Informational);
+    assert_eq!(item.reasons.len(), 2);
+    item.findings = parse_nvd(
+        &nvd(),
+        product(),
+        item.installed_version.as_ref().unwrap(),
+        "now",
+    )
+    .unwrap()
+    .0;
+    summarize(&mut item);
+    assert_eq!(item.applicability, Applicability::Matched);
+    assert_eq!(item.priority, Priority::High);
+}
+#[test]
+fn untrusted_registry_id_is_not_mapping_evidence() {
+    let raw = json!({"records":[{"display_name":"7-Zip","publisher":"Vendor","installed_version":"24.06","normalized_id":"7zip.7zip","install_path_hash":null,"installation_source":"UNKNOWN","scanner":"registry","source_id":"a".repeat(64),"scope":"user","view":"Registry64","catalog_source":null}],"coverage":[]});
+    let mut a = crate::model::normalize(serde_json::from_value(raw).unwrap(), "now")
+        .unwrap()
+        .0
+        .remove(0);
+    assert!(product_for(&a).is_none());
+    a.provenance[0].scanner = "winget".into();
+    a.provenance[0].catalog_source = Some("winget".into());
+    assert!(product_for(&a).is_some());
+}

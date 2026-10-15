@@ -84,6 +84,8 @@ jobs:
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin inventory_probe
       - name: Build opt-in npm project integration probe
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin npm_probe
+      - name: Build opt-in real device security integration probe
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin security_probe
       - name: Build isolated native acceptance executable
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-acceptance --release --features acceptance --bin safepatch
       - name: Seal production Preview identity and checksums
@@ -111,5 +113,6 @@ jobs:
             src-tauri/target-acceptance/release/safepatch.exe
             src-tauri/target/debug/inventory_probe.exe
             src-tauri/target/debug/npm_probe.exe
+            src-tauri/target/debug/security_probe.exe
             ${{ env.PREVIEW_STAGE }}/ci-*.json
           retention-days: 7

@@ -1,0 +1,20 @@
+name: Publish verified v0.3.0 Preview
+on:
+  push:
+    tags: [v0.3.0-preview]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Publish exact successful main packages with embedded identity and digest verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-security-preview.ps1

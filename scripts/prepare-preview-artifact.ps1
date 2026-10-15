@@ -38,16 +38,23 @@ foreach($format in @('nsis','msi')){
  $files+=@{name=$name;sha256=(Get-FileHash -LiteralPath (Join-Path $stage $name)).Hash.ToLowerInvariant();size_bytes=$matches[0].Length}
 }
 Copy-Item -LiteralPath $production.Path -Destination (Join-Path $stage 'safepatch.exe')
-Copy-Item -LiteralPath 'docs/WINDOWS_PREVIEW.md' -Destination (Join-Path $stage 'README.md')
+Copy-Item -LiteralPath 'docs/WINDOWS_SECURITY_PREVIEW.md' -Destination (Join-Path $stage 'README.md')
 $commit=(& git rev-parse HEAD).Trim()
 if($commit -notmatch '^[0-9a-f]{40}$'){throw 'PREVIEW_COMMIT_INVALID'}
-@{schema=1;product='SafePatch Preview';version=$version;channel='Preview';architecture='x86_64';source_commit=$commit;ci_event=$env:GITHUB_EVENT_NAME;ci_run_id=$env:GITHUB_RUN_ID;ci_run_attempt=$env:GITHUB_RUN_ATTEMPT;host='GitHub Windows Server';os_build=[Environment]::OSVersion.Version.ToString();signature='UNSIGNED';production_sha256=$hash;installers=$files;features=@('Read-only WinGet update health','Windows Registry/WinGet','VS Code/Extensions','Node resource metadata','npm lockfile declarations');user_windows_10_11='NOT_VERIFIED'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding utf8
+$metadataPath=Join-Path $env:RUNNER_TEMP ('preview-build-'+[Guid]::NewGuid().ToString('N')+'.json')
+$metadataProcess=Start-Process -FilePath $production.Path -ArgumentList '--build-info' -WindowStyle Hidden -RedirectStandardOutput $metadataPath -PassThru
+if(-not $metadataProcess.WaitForExit(15000)){$metadataProcess.Kill();$metadataProcess.WaitForExit();throw 'PREVIEW_BUILD_INFO_TIMEOUT'}
+if($metadataProcess.ExitCode -ne 0){throw 'PREVIEW_BUILD_INFO_FAILED'}
+$build=Get-Content -LiteralPath $metadataPath -Raw|ConvertFrom-Json
+if($build.version -cne $version -or $build.build_sha -cne $commit -or $build.dirty -ne $false -or $build.channel -cne 'Preview'){throw 'PREVIEW_EMBEDDED_VERSION_MISMATCH'}
+@{schema=1;product='SafePatch Preview';version=$version;channel='Preview';architecture='x86_64';source_commit=$commit;embedded_build=$build;ci_event=$env:GITHUB_EVENT_NAME;ci_run_id=$env:GITHUB_RUN_ID;ci_run_attempt=$env:GITHUB_RUN_ATTEMPT;host='GitHub Windows Server';os_build=[Environment]::OSVersion.Version.ToString();signature='UNSIGNED';production_sha256=$hash;installers=$files;features=@('Opt-in OSV NVD CISA KEV evidence','Embedded binary version/build metadata','Read-only WinGet update health','Windows Registry/WinGet','VS Code/Extensions','Node resource metadata','npm lockfile declarations');user_windows_10_11='NOT_VERIFIED'}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding utf8
 # Read compiled MSI tables, not just source configuration.
 $msi=Get-ChildItem -LiteralPath $stage -Filter '*.msi'
 $installer=New-Object -ComObject WindowsInstaller.Installer
 $db=$installer.OpenDatabase($msi.FullName,0)
 function Rows($sql){return ,(Read-PreviewMsiRows $db $sql)}
 $properties=Rows 'SELECT Property, Value FROM Property'
+if(@($properties|Where-Object{$_.Fields[0] -ceq 'ProductVersion' -and $_.Fields[1] -ceq $conf.bundle.windows.wix.version}).Count -ne 1){throw 'PREVIEW_MSI_VERSION_MISMATCH'}
 if(@($properties|Where-Object{$_.Fields[0] -eq 'ALLUSERS' -and $_.Fields[1]}).Count -ne 0){throw 'PREVIEW_MSI_ALLUSERS'}
 $privileges=[int]$db.SummaryInformation(0).Property(15)
 if(($privileges -band 8) -ne 8){throw 'PREVIEW_MSI_ELEVATION_REQUIRED'}
@@ -75,4 +82,4 @@ foreach($package in @((Get-ChildItem -LiteralPath $stage -Filter '*-setup.exe'),
  if($payloads.Count -ne 1){throw 'PREVIEW_EXTRACTED_PAYLOAD_MISMATCH'}
 }
 "PREVIEW_STAGE=$stage"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-@{status='PASS';payload_sha256=$hash;compiled_msi_per_user=$true;compiled_msi_limited=$true;allusers_guard=$true;no_executable_custom_actions=$true;extracted_payloads_match=$true}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $stage 'ci-package-checks.json') -Encoding utf8
+@{status='PASS';payload_sha256=$hash;compiled_msi_per_user=$true;compiled_msi_limited=$true;allusers_guard=$true;no_executable_custom_actions=$true;extracted_payloads_match=$true;embedded_version=$build.version;embedded_sha=$build.build_sha;msi_version=$conf.bundle.windows.wix.version}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $stage 'ci-package-checks.json') -Encoding utf8

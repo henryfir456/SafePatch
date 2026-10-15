@@ -6,6 +6,21 @@ use tauri::Manager;
 pub struct Acceptance {pub mode:String,pub directory:PathBuf,pub project_root:Option<String>}
 #[derive(Deserialize,Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct SecurityReport {mode:String,scan_id:Option<String>,item_count:usize,rendered_rows:usize,cancellation:bool,metadata_verified:bool,passed:bool,error_code:Option<String>}
+#[tauri::command]
+pub fn acceptance_security_report(app:tauri::AppHandle,state:tauri::State<'_,Acceptance>,service:tauri::State<'_,Arc<ScanService>>,mut report:SecurityReport)->Result<(),String>{
+    let previous=state.directory.join("security-desktop-scan.json");
+    if let Some(id)=&report.scan_id{
+        let actual=service.last_security_report()?.ok_or("ACCEPTANCE_REPORT_MISSING")?;
+        report.passed &= report.mode==state.mode&&actual.scan_id==*id&&report.item_count==actual.items.len()&&report.rendered_rows==actual.items.len().min(200)&&report.metadata_verified&&actual.items.iter().any(|i|i.checks.iter().any(|c|c.status=="COMPLETE"&&matches!(c.source.as_str(),"OSV"|"NVD")));
+        if state.mode=="security-restart"{let prior:SecurityReport=serde_json::from_slice(&std::fs::read(previous).map_err(|_|"ACCEPTANCE_PREVIOUS_MISSING")?).map_err(|_|"ACCEPTANCE_PREVIOUS_INVALID")?;report.passed &= prior.passed&&prior.cancellation&&prior.scan_id==report.scan_id&&prior.item_count==report.item_count;}else{report.passed &= report.cancellation;}
+    }else{report.passed=false;}
+    let path=state.directory.join(if state.mode=="security-restart"{"security-desktop-restart.json"}else{"security-desktop-scan.json"});
+    std::fs::write(path,serde_json::to_vec_pretty(&report).map_err(|_|"ACCEPTANCE_WRITE_FAILED")?).map_err(|_|"ACCEPTANCE_WRITE_FAILED")?;
+    app.exit(if report.passed{0}else{1});Ok(())
+}
+#[derive(Deserialize,Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Report {
     mode:String,scan_id:Option<String>,asset_count:usize,rendered_rows:usize,
     #[serde(default)] update_count:usize,
@@ -51,14 +66,14 @@ pub fn acceptance_report(app:tauri::AppHandle,state:tauri::State<'_,Acceptance>,
     app.exit(if report.passed{0}else{1});Ok(())
 }
 pub fn configure(app:&mut tauri::App)->Result<(),Box<dyn std::error::Error>>{
-    let mode=if std::env::args().any(|s|s=="--acceptance-npm-restart"){"npm-restart"}else if std::env::args().any(|s|s=="--acceptance-npm"){"npm-scan"}else if std::env::args().any(|s|s=="--acceptance-restart"){"restart"}else{"scan"};
+    let mode=if std::env::args().any(|s|s=="--acceptance-security-restart"){"security-restart"}else if std::env::args().any(|s|s=="--acceptance-security"){"security-scan"}else if std::env::args().any(|s|s=="--acceptance-npm-restart"){"npm-restart"}else if std::env::args().any(|s|s=="--acceptance-npm"){"npm-scan"}else if std::env::args().any(|s|s=="--acceptance-restart"){"restart"}else{"scan"};
     let directory=std::env::current_exe()?.parent().ok_or("missing executable directory")?.to_owned();
     let project_root=if mode.starts_with("npm-"){Some(std::env::var("SAFEPATCH_NPM_PROJECT_ROOT")?)}else{None};
-    let service=ScanService::new(directory.join(if project_root.is_some(){"npm-desktop-acceptance.sqlite"}else{"desktop-acceptance.sqlite"})).map_err(std::io::Error::other)?;
+    let service=ScanService::new(directory.join(if mode.starts_with("security-"){"security-desktop-acceptance.sqlite"}else if project_root.is_some(){"npm-desktop-acceptance.sqlite"}else{"desktop-acceptance.sqlite"})).map_err(std::io::Error::other)?;
     app.manage(service);app.manage(Acceptance{mode:mode.into(),directory,project_root});
     let window=app.get_webview_window("main").ok_or("missing main window")?;
     window.hide()?;
-    let handle=app.handle().clone();
-    std::thread::spawn(move||{std::thread::sleep(std::time::Duration::from_secs(450));handle.exit(2);});
+    let handle=app.handle().clone();let timeout=if mode.starts_with("security-"){600}else{450};
+    std::thread::spawn(move||{std::thread::sleep(std::time::Duration::from_secs(timeout));handle.exit(2);});
     Ok(())
 }

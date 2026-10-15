@@ -34,7 +34,7 @@
       "icons/icon.ico"
     ],
     "publisher": "henryfir456",
-    "shortDescription": "Read-only update health preview; no CVE analysis or automatic updates.",
+    "shortDescription": "Read-only security health preview; opt-in advisory evidence, no automatic updates.",
     "windows": {
       "webviewInstallMode": {
         "type": "skip"

@@ -10,7 +10,7 @@ OSV 只查 npm 公開 registry 宣告的精確名稱與版本；lockfile 不當�
 
 固定 HTTPS 端點、禁止重導、8 MiB 回應、20 秒請求超時、5 分鐘總掃描界限、來源節流、每掃描查詢上限、24 小時快取。取消中止請求及後續處理。過期快取不得轉成安全結論。來源失敗/截斷/不支援為 PARTIAL。官方公告僅保留驗證 HTTPS 參照，不自動抓取任意遠端網址。
 
-單一 release.json 定義版本與通道，package/Cargo/Tauri 為受測試檢查的鏡像。Rust build.rs 檢查一致性，建置時嵌入 Git SHA（無 Git 明確 unavailable）；CI 檢查 SHA/tag。UI 透過 IPC 取得二進位中繼資料，不以字串假冒版本。不提供沒有可靠來源的 Build 時間。
+單一 package.json 定義版本，通道由版本後綴推導；Cargo/Tauri/lockfile 與 MSI 數值版本由測試及 build.rs 核對。Rust build.rs 檢查一致性，建置時嵌入 Git SHA（無 Git 明確 unavailable）；CI 檢查 SHA/tag。UI 透過 IPC 取得二進位中繼資料，不以字串假冒版本。不提供沒有可靠來源的 Build 時間。
 
 ## 分階段執行
 

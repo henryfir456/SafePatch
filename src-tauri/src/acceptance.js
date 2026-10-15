@@ -27,6 +27,8 @@
     const available=updateAssets.length;
     const unknown=assets.filter(a=>['UNKNOWN','ERROR'].includes(a.update?.status??'UNKNOWN')).length;
     await wait(()=>document.querySelector('[data-testid=update-count]')?.textContent===String(available) && document.querySelector('[data-testid=unknown-count]')?.textContent===String(unknown));
+    buttons().find(b=>b.textContent==='更新健檢').click();
+    await new Promise(r=>setTimeout(r,100));
     const updateRows=[...document.querySelectorAll('section:not([hidden]) tbody tr')];
     if(updateRows.length!==available || updateRows.some((r,i)=>r.cells[0].querySelector('b').textContent!==updateAssets[i].display_name || r.cells[1].textContent!==updateAssets[i].installed_version || r.cells[2].textContent!==updateAssets[i].update.target_version || !r.cells[3].textContent.includes('UPDATE_AVAILABLE') || !r.cells[4].textContent.includes(updateAssets[i].update.source_url) || !r.cells[4].textContent.includes(updateAssets[i].update.package_id)))throw Error('ACCEPTANCE_UPDATE_RENDER_FAILED');
     if(document.querySelector('[data-testid=unknown-count]')?.textContent!==String(unknown))throw Error('ACCEPTANCE_UPDATE_SUMMARY_FAILED');
